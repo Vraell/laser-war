@@ -84,6 +84,62 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(game.has_possible_path_to_king(board, "bottom"))
         self.assertEqual(game.legal_moves(State(board, turn="bottom")), [])
 
+    def test_possible_path_cannot_pass_through_the_other_king(self):
+        game = Game()
+        state = game.initial_state()
+        setup = (
+            Move(1, 6, Cell.MIRROR_BACKSLASH),
+            Move(2, 6, Cell.MIRROR_SLASH),
+            Move(3, 0, Cell.MIRROR_BACKSLASH),
+            Move(3, 6, Cell.MIRROR_BACKSLASH),
+            Move(4, 1, Cell.MIRROR_BACKSLASH),
+            Move(4, 7, Cell.MIRROR_BACKSLASH),
+            Move(5, 0, Cell.MIRROR_BACKSLASH),
+            Move(5, 1, Cell.MIRROR_SLASH),
+        )
+        for move in setup:
+            state = game.apply_move(state, move)
+
+        fortress_move = Move(5, 8, Cell.MIRROR_BACKSLASH)
+
+        self.assertFalse(game.is_legal_move(state, fortress_move))
+        with self.assertRaisesRegex(ValueError, "your king"):
+            game.apply_move(state, fortress_move)
+
+    def test_simultaneous_beams_destroy_a_shared_shield_once(self):
+        game = Game()
+        board = [[Cell.EMPTY for _ in range(game.size)] for _ in range(game.size)]
+        board[0][4] = Cell.TOP_KING
+        board[4][4] = Cell.SHIELD
+        board[8][4] = Cell.BOTTOM_KING
+        state = State(tuple(tuple(row) for row in board), turn="bottom")
+
+        outcome = game.resolve_move(
+            state,
+            Move(0, 0, Cell.MIRROR_SLASH),
+            check_no_legal_moves=False,
+        )
+
+        self.assertEqual(outcome.destroyed, ((4, 4),))
+        self.assertEqual(tuple(beam.hit_shield for beam in outcome.beams), ((4, 4), (4, 4)))
+        self.assertEqual(outcome.state.board[4][4], Cell.EMPTY)
+
+    def test_evaluation_recognizes_immediate_king_pressure(self):
+        game = Game()
+        board = [[Cell.EMPTY for _ in range(game.size)] for _ in range(game.size)]
+        board[0][4] = Cell.TOP_KING
+        board[4][1] = Cell.SHIELD
+        board[8][4] = Cell.BOTTOM_KING
+
+        board[4][4] = Cell.MIRROR_SLASH
+        bottom_threatened = State(tuple(tuple(row) for row in board), turn="bottom")
+
+        board[4][4] = Cell.MIRROR_BACKSLASH
+        top_threatened = State(tuple(tuple(row) for row in board), turn="bottom")
+
+        self.assertLess(game.evaluate(bottom_threatened), 0)
+        self.assertGreater(game.evaluate(top_threatened), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

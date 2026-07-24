@@ -2,7 +2,7 @@ import unittest
 from threading import Event
 
 from laser_war.ai import DIFFICULTIES, ComputerAI
-from laser_war.engine import Game
+from laser_war.engine import Cell, Game, Move
 
 
 class AITests(unittest.TestCase):
@@ -33,6 +33,23 @@ class AITests(unittest.TestCase):
         self.assertLess(DIFFICULTIES["easy"].time_limit, DIFFICULTIES["medium"].time_limit)
         self.assertLess(DIFFICULTIES["medium"].time_limit, DIFFICULTIES["hard"].time_limit)
         self.assertLess(DIFFICULTIES["easy"].max_depth, DIFFICULTIES["hard"].max_depth)
+
+    def test_easy_ai_answers_the_center_gambit(self):
+        game = Game()
+        state = game.resolve_move(
+            game.initial_state(),
+            Move(4, 4, Cell.MIRROR_SLASH),
+            check_no_legal_moves=False,
+        ).state
+
+        response = ComputerAI(game, seed=7).choose_move(state, "easy")
+        defended = game.resolve_move(state, response.move, check_no_legal_moves=False).state
+        opponent_can_win_immediately = any(
+            game.resolve_move(defended, move, check_no_legal_moves=False).state.winner == "bottom"
+            for move in game.legal_moves(defended)
+        )
+
+        self.assertFalse(opponent_can_win_immediately)
 
 
 if __name__ == "__main__":

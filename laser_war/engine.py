@@ -132,7 +132,7 @@ class Game:
         beams = self.fire_lasers(placed)
         damaged = [list(row) for row in placed]
         hit_kings = frozenset(result.hit_king for result in beams if result.hit_king)
-        destroyed = tuple(result.hit_shield for result in beams if result.hit_shield)
+        destroyed = tuple(dict.fromkeys(result.hit_shield for result in beams if result.hit_shield))
 
         for r, c in destroyed:
             damaged[r][c] = Cell.EMPTY
@@ -213,8 +213,19 @@ class Game:
 
         own_shields = self._nearby_shields(state.board, own_king)
         opp_shields = self._nearby_shields(state.board, opp_king)
-        mobility = len(list(self._pseudo_moves(state)))
-        return (own_shields - opp_shields) * 25 + mobility * 0.1
+        score = (own_shields - opp_shields) * 25
+
+        own = state.turn
+        opponent = TURNS[own]
+        threatened = {beam.hit_king for beam in self.fire_lasers(state.board) if beam.hit_king}
+        if own in threatened and opponent in threatened:
+            score += 150
+        elif opponent in threatened:
+            score += 300
+        elif own in threatened:
+            score -= 300
+
+        return score
 
     def render(self, state: State, show_coords: bool = False) -> str:
         lines = []
@@ -259,8 +270,6 @@ class Game:
                 if (nr, nc) not in forbidden_turns:
                     for next_direction in self._turns(direction):
                         stack.append((nr, nc, next_direction))
-            else:
-                stack.append((nr, nc, direction))
         return False
 
     def _trace_beam(self, board: tuple[tuple[Cell, ...], ...], source: tuple[int, int, str]) -> BeamResult:
