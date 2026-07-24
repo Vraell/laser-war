@@ -46,6 +46,28 @@ def color(name: str) -> pygame.Color:
     return pygame.Color(COLORS[name])
 
 
+class CrispFont:
+    def __init__(self, path: Path, size: int, *, bold: bool = False, scale: int = 2):
+        self.scale = scale
+        self.font = pygame.font.Font(path, size * scale)
+        self.font.set_bold(bold)
+
+    def render(self, value: str, antialias: bool, foreground: pygame.Color) -> pygame.Surface:
+        rendered = self.font.render(value, antialias, foreground)
+        target_size = (
+            max(1, round(rendered.get_width() / self.scale)),
+            max(1, round(rendered.get_height() / self.scale)),
+        )
+        return pygame.transform.smoothscale(rendered, target_size)
+
+    def size(self, value: str) -> tuple[int, int]:
+        width, height = self.font.size(value)
+        return round(width / self.scale), round(height / self.scale)
+
+    def get_linesize(self) -> int:
+        return round(self.font.get_linesize() / self.scale)
+
+
 @dataclass
 class Button:
     rect: pygame.Rect
@@ -55,7 +77,7 @@ class Button:
     enabled: bool = True
     danger: bool = False
 
-    def draw(self, surface: pygame.Surface, font: pygame.font.Font, mouse: tuple[int, int]) -> None:
+    def draw(self, surface: pygame.Surface, font: CrispFont, mouse: tuple[int, int]) -> None:
         hovered = self.enabled and self.rect.collidepoint(mouse)
         if not self.enabled:
             fill = color("panel_light")
@@ -115,14 +137,14 @@ class LaserWarGame:
         self.clock = pygame.time.Clock()
         self.running = True
 
+        font_path = Path(__file__).parent / "assets" / "fonts" / "InterVariable.ttf"
         self.fonts = {
-            "title": pygame.font.SysFont("Avenir Next", 64, bold=True),
-            "h1": pygame.font.SysFont("Avenir Next", 34, bold=True),
-            "h2": pygame.font.SysFont("Avenir Next", 22, bold=True),
-            "body": pygame.font.SysFont("Avenir Next", 17),
-            "small": pygame.font.SysFont("Avenir Next", 14),
-            "tiny": pygame.font.SysFont("Avenir Next", 12),
-            "mirror": pygame.font.SysFont("Helvetica", 39, bold=True),
+            "title": CrispFont(font_path, 64, bold=True),
+            "h1": CrispFont(font_path, 34, bold=True),
+            "h2": CrispFont(font_path, 22, bold=True),
+            "body": CrispFont(font_path, 17),
+            "small": CrispFont(font_path, 14),
+            "tiny": CrispFont(font_path, 12, bold=True),
         }
         self.audio = AudioBank()
         self.background = self._load_background()
@@ -813,7 +835,7 @@ class LaserWarGame:
     def _text(
         self,
         value: str,
-        font: pygame.font.Font,
+        font: CrispFont,
         foreground: pygame.Color,
         position: tuple[int, int],
     ) -> None:
@@ -822,7 +844,7 @@ class LaserWarGame:
     def _wrapped_text(
         self,
         value: str,
-        font: pygame.font.Font,
+        font: CrispFont,
         foreground: pygame.Color,
         rect: pygame.Rect,
     ) -> int:

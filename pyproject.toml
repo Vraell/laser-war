@@ -23,7 +23,7 @@ where = ["."]
 include = ["laser_war*"]
 
 [tool.setuptools.package-data]
-laser_war = ["assets/*.png"]
+laser_war = ["assets/*.png", "assets/fonts/*.ttf", "assets/fonts/*.txt"]
 
 [tool.ruff]
 line-length = 120

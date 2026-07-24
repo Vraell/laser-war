@@ -21,6 +21,8 @@ The game includes:
 - pause, undo, redo, restart, autosave, and continue;
 - a validated match history with damage events.
 
+The interface uses the bundled Inter typeface under the SIL Open Font License.
+
 ## Controls
 
 - `Q` selects the `/` mirror.
