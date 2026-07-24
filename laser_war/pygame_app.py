@@ -11,7 +11,7 @@ import pygame
 
 from .ai import DIFFICULTIES, ComputerAI, SearchResult
 from .audio import AudioBank
-from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move
+from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move, State
 from .session import GameSession, TurnRecord
 
 DESIGN_SIZE = (1280, 800)
@@ -163,6 +163,7 @@ class LaserWarGame:
         self.toast_until = 0.0
         self.ai_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="laser-war-ai")
         self.ai_future: Future[SearchResult] | None = None
+        self.ai_state: State | None = None
         self.ai_cancel = Event()
         self.ai_started = 0.0
         self.last_search: SearchResult | None = None
@@ -255,15 +256,26 @@ class LaserWarGame:
 
         if self.ai_future and self.ai_future.done():
             future = self.ai_future
+            searched_state = self.ai_state
             self.ai_future = None
+            self.ai_state = None
             try:
                 result = future.result()
             except Exception as exc:
                 self._show_toast(f"Computer error: {exc}")
                 return
+            if searched_state != self.session.state:
+                if self._computer_turn():
+                    self._start_ai()
+                return
             self.last_search = result
             if result.move is None:
                 self._show_toast("No legal moves. The game is a draw.")
+                return
+            if not self.session.game.is_legal_move(self.session.state, result.move):
+                self._show_toast("Position changed. Computer is searching again.")
+                if self._computer_turn():
+                    self._start_ai()
                 return
             record = self.session.play(result.move, "Computer")
             self._begin_animation(record)
@@ -539,12 +551,11 @@ class LaserWarGame:
         )
         self._add_buttons([slash, backslash], mouse)
 
-        undo_plies = 2 if self.session.mode == "computer" and len(self.session.history) >= 2 else 1
         controls = [
             Button(
                 pygame.Rect(780, 254, 104, 44),
                 "Undo",
-                lambda: self._undo(undo_plies),
+                self._undo,
                 enabled=bool(self.session.history) and not self.animation,
             ),
             Button(
@@ -681,6 +692,7 @@ class LaserWarGame:
         difficulty = self.session.difficulty
         ai = ComputerAI(self.session.game)
         self.ai_started = monotonic()
+        self.ai_state = state
         self.ai_future = self.ai_executor.submit(ai.choose_move, state, difficulty, self.ai_cancel)
 
     def _cancel_ai(self) -> None:
@@ -688,6 +700,7 @@ class LaserWarGame:
         if self.ai_future:
             self.ai_future.cancel()
             self.ai_future = None
+        self.ai_state = None
 
     def _start_game(self, mode: str) -> None:
         self.menu_mode = mode
@@ -712,21 +725,23 @@ class LaserWarGame:
         if self._computer_turn():
             self._start_ai()
 
-    def _undo(self, plies: int = 1) -> None:
+    def _undo(self) -> None:
         self._cancel_ai()
         self.animation = None
-        if self.session.undo(plies):
+        if self.session.undo():
             self.audio.play("undo")
             self.last_search = None
             self._refresh_legal_moves()
             self._autosave()
 
     def _redo(self) -> None:
+        self._cancel_ai()
         if self.session.redo():
             self.audio.play("place")
+            self.last_search = None
             self._refresh_legal_moves()
             self._autosave()
-            if self._computer_turn():
+            if self._computer_turn() and not self.session.redo_stack:
                 self._start_ai()
 
     def _restart(self) -> None:

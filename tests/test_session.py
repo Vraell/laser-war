@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from laser_war.engine import Cell, Move
+from laser_war.engine import Cell, Move, State
 from laser_war.session import GameSession
 
 
@@ -36,6 +36,22 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(loaded.mode, "computer")
             self.assertEqual(loaded.difficulty, "hard")
             self.assertEqual(loaded.history[0].summary, session.history[0].summary)
+
+    def test_failed_redo_keeps_the_record_available(self):
+        session = GameSession(mode="local")
+        move = Move(4, 4, Cell.MIRROR_SLASH)
+        session.play(move, "Bottom")
+        session.undo()
+
+        board = [list(row) for row in session.state.board]
+        board[move.row][move.col] = Cell.MIRROR_BACKSLASH
+        session.state = State(tuple(tuple(row) for row in board), turn=session.state.turn)
+
+        with self.assertRaisesRegex(ValueError, "not empty"):
+            session.redo()
+
+        self.assertEqual(len(session.redo_stack), 1)
+        self.assertEqual(session.redo_stack[-1].move, move)
 
     def test_unknown_save_version_is_rejected(self):
         with TemporaryDirectory() as directory:

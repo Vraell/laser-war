@@ -79,9 +79,10 @@ class GameSession:
     def redo(self, plies: int = 1) -> list[TurnRecord]:
         restored: list[TurnRecord] = []
         for _ in range(min(plies, len(self.redo_stack))):
-            old_record = self.redo_stack.pop()
+            old_record = self.redo_stack[-1]
             before = self.state
             outcome = self.game.resolve_move(before, old_record.move)
+            self.redo_stack.pop()
             record = TurnRecord(len(self.history) + 1, old_record.actor, before, old_record.move, outcome)
             self.history.append(record)
             self.state = outcome.state
