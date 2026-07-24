@@ -95,7 +95,12 @@ If both kings are hit on the same turn, the engine records the result as a draw.
 
 ## Anti-Fortress Rule
 
-After a move is applied and laser damage is resolved, at least one laser must still have a possible path to each king. A player cannot make either king permanently unreachable.
+After a move is applied and laser damage is resolved:
+
+- at least one laser must still have a possible path to each king;
+- each laser must still have a possible path to at least one king.
+
+A player cannot make either king permanently unreachable or leave either laser permanently stranded.
 
 For this reconstruction:
 
@@ -105,7 +110,8 @@ For this reconstruction:
 - empty squares count as possible future routing squares.
 - forbidden laser-entry and king-adjacent squares can be crossed by a beam, but cannot be treated as possible future mirror turns.
 
-That means a move is illegal if it completely seals either king away from both side lasers.
+That means a move is illegal if it completely seals either king away from both side lasers, or if one side laser
+can no longer possibly reach either king.
 
 ## No Legal Move
 

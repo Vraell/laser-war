@@ -7,7 +7,7 @@ from typing import Any
 
 from .engine import Cell, Game, Move, MoveOutcome, State
 
-SAVE_VERSION = 1
+SAVE_VERSION = 2
 
 
 @dataclass(frozen=True)

@@ -335,7 +335,7 @@ class LaserWarGame:
         sound = "Sound: On" if self.audio.enabled else "Sound: Off"
         self._menu_button(sound, 676, self.audio.toggle)
 
-        version = self.fonts["tiny"].render("v0.2", True, color("muted"))
+        version = self.fonts["tiny"].render("v0.3", True, color("muted"))
         self.canvas.blit(version, (448, 757))
 
     def _draw_rules(self, mouse: tuple[int, int]) -> None:
@@ -354,7 +354,7 @@ class LaserWarGame:
             ("FIRE", "Both lasers fire after every move. Mirrors redirect beams by 90 degrees."),
             ("DAMAGE", "A beam destroys the first shield it touches. Mirrors cannot be destroyed."),
             ("WIN", "Hit the opposing king without hitting your own. A simultaneous king hit is a draw."),
-            ("RESTRICTIONS", "Grey cells reject mirrors. Every legal move must leave a possible route to both kings."),
+            ("RESTRICTIONS", "Each king must remain reachable, and each laser must retain a route to a king."),
             ("CONTROLS", "Q and E select mirrors. U undoes. R restarts. Escape pauses."),
         ]
         for index, (heading, body) in enumerate(sections):

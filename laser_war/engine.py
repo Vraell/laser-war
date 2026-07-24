@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -84,6 +85,10 @@ class Game:
         self.size = size
         self.sources = ((MIDDLE_ROW, -1, "E"), (MIDDLE_ROW, size, "W"))
         self.no_mirror_squares = NO_MIRROR_SQUARES
+        self._reachability_cache: OrderedDict[
+            tuple[tuple[Cell, ...], ...],
+            tuple[frozenset[str], frozenset[str]],
+        ] = OrderedDict()
 
     def initial_state(self, turn: str = "bottom") -> State:
         board = [[Cell.EMPTY for _ in range(self.size)] for _ in range(self.size)]
@@ -148,10 +153,14 @@ class Game:
         elif own in hit_kings:
             next_state = State(next_board, turn=opponent, winner=opponent)
         else:
-            if not self.has_possible_path_to_king(next_board, own):
+            reachable = self.reachable_kings_by_laser(next_board)
+            if not any(own in kings for kings in reachable):
                 raise ValueError("Illegal move: it fully blocks all possible laser paths to your king.")
-            if not self.has_possible_path_to_king(next_board, opponent):
+            if not any(opponent in kings for kings in reachable):
                 raise ValueError("Illegal move: it fully blocks all possible laser paths to the opponent's king.")
+            for label, kings in zip(("left", "right"), reachable, strict=True):
+                if not kings:
+                    raise ValueError(f"Illegal move: it leaves the {label} laser with no possible path to either king.")
             if check_no_legal_moves:
                 provisional = State(next_board, turn=opponent)
                 next_state = State(next_board, turn=opponent, draw=not self.has_any_legal_move(provisional))
@@ -242,10 +251,33 @@ class Game:
         return "\n".join(lines + [status])
 
     def has_possible_path_to_king(self, board: tuple[tuple[Cell, ...], ...], player: str) -> bool:
-        target = Cell.BOTTOM_KING if player == "bottom" else Cell.TOP_KING
+        return any(player in kings for kings in self.reachable_kings_by_laser(board))
+
+    def reachable_kings_by_laser(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        cached = self._reachability_cache.get(board)
+        if cached is not None:
+            self._reachability_cache.move_to_end(board)
+            return cached
+
+        left, right = self.sources
+        reachable = self._reachable_kings(board, left), self._reachable_kings(board, right)
+        self._reachability_cache[board] = reachable
+        if len(self._reachability_cache) > 16_384:
+            self._reachability_cache.popitem(last=False)
+        return reachable
+
+    def _reachable_kings(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+        source: tuple[int, int, str],
+    ) -> frozenset[str]:
         forbidden_turns = self.mirror_forbidden_squares(board)
+        reachable = set()
         seen = set()
-        stack = list(self.sources)
+        stack = [source]
 
         while stack:
             r, c, direction = stack.pop()
@@ -259,9 +291,11 @@ class Game:
             seen.add(key)
 
             cell = board[nr][nc]
-            if cell == target:
-                return True
-            if cell == Cell.MIRROR_SLASH:
+            if cell == Cell.TOP_KING:
+                reachable.add("top")
+            elif cell == Cell.BOTTOM_KING:
+                reachable.add("bottom")
+            elif cell == Cell.MIRROR_SLASH:
                 stack.append((nr, nc, SLASH[direction]))
             elif cell == Cell.MIRROR_BACKSLASH:
                 stack.append((nr, nc, BACKSLASH[direction]))
@@ -270,7 +304,9 @@ class Game:
                 if (nr, nc) not in forbidden_turns:
                     for next_direction in self._turns(direction):
                         stack.append((nr, nc, next_direction))
-        return False
+            if len(reachable) == 2:
+                return frozenset(reachable)
+        return frozenset(reachable)
 
     def _trace_beam(self, board: tuple[tuple[Cell, ...], ...], source: tuple[int, int, str]) -> BeamResult:
         r, c, direction = source

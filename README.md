@@ -18,6 +18,7 @@ The game includes:
 - scalable 60 FPS rendering;
 - animated simultaneous lasers, impacts, particles, and synthesized sound;
 - legal-move highlighting and forbidden-square markings;
+- symmetric anti-fortress rules that keep both kings and both lasers viable;
 - pause, undo, redo, restart, autosave, and continue;
 - a validated match history with damage events.
 

@@ -26,6 +26,10 @@ class EngineTests(unittest.TestCase):
         state = game.initial_state()
 
         self.assertEqual(len(game.legal_moves(state)), 130)
+        self.assertEqual(
+            game.reachable_kings_by_laser(state.board),
+            (frozenset({"top", "bottom"}), frozenset({"top", "bottom"})),
+        )
 
     def test_apply_move_places_mirror_and_changes_turn(self):
         game = Game()
@@ -86,25 +90,59 @@ class EngineTests(unittest.TestCase):
 
     def test_possible_path_cannot_pass_through_the_other_king(self):
         game = Game()
+        layout = (
+            "...OkO...",
+            "...OOO\\..",
+            "....O./..",
+            "\\.....\\..",
+            ".\\.....\\.",
+            "\\/......\\",
+            "....O....",
+            "...OOO...",
+            "...OKO...",
+        )
+        board = tuple(tuple(Cell(symbol) for symbol in row) for row in layout)
+
+        self.assertTrue(game.has_possible_path_to_king(board, "top"))
+        self.assertFalse(game.has_possible_path_to_king(board, "bottom"))
+
+    def test_move_cannot_permanently_strand_a_laser(self):
+        game = Game()
         state = game.initial_state()
         setup = (
-            Move(1, 6, Cell.MIRROR_BACKSLASH),
-            Move(2, 6, Cell.MIRROR_SLASH),
-            Move(3, 0, Cell.MIRROR_BACKSLASH),
-            Move(3, 6, Cell.MIRROR_BACKSLASH),
-            Move(4, 1, Cell.MIRROR_BACKSLASH),
             Move(4, 7, Cell.MIRROR_BACKSLASH),
-            Move(5, 0, Cell.MIRROR_BACKSLASH),
-            Move(5, 1, Cell.MIRROR_SLASH),
+            Move(8, 7, Cell.MIRROR_SLASH),
+            Move(4, 1, Cell.MIRROR_SLASH),
+            Move(0, 0, Cell.MIRROR_SLASH),
+            Move(0, 1, Cell.MIRROR_SLASH),
+            Move(0, 2, Cell.MIRROR_SLASH),
+            Move(1, 1, Cell.MIRROR_SLASH),
+            Move(1, 2, Cell.MIRROR_BACKSLASH),
+            Move(2, 2, Cell.MIRROR_BACKSLASH),
+            Move(2, 4, Cell.MIRROR_BACKSLASH),
+            Move(3, 1, Cell.MIRROR_BACKSLASH),
+            Move(3, 7, Cell.MIRROR_BACKSLASH),
+            Move(3, 6, Cell.MIRROR_BACKSLASH),
+            Move(2, 6, Cell.MIRROR_SLASH),
+            Move(2, 7, Cell.MIRROR_SLASH),
+            Move(1, 7, Cell.MIRROR_SLASH),
+            Move(1, 8, Cell.MIRROR_SLASH),
+            Move(0, 6, Cell.MIRROR_BACKSLASH),
+            Move(0, 8, Cell.MIRROR_BACKSLASH),
         )
         for move in setup:
             state = game.apply_move(state, move)
 
-        fortress_move = Move(5, 8, Cell.MIRROR_BACKSLASH)
+        self.assertEqual(
+            game.reachable_kings_by_laser(state.board),
+            (frozenset({"top", "bottom"}), frozenset({"top", "bottom"})),
+        )
 
-        self.assertFalse(game.is_legal_move(state, fortress_move))
-        with self.assertRaisesRegex(ValueError, "your king"):
-            game.apply_move(state, fortress_move)
+        stranding_move = Move(0, 7, Cell.MIRROR_BACKSLASH)
+
+        self.assertFalse(game.is_legal_move(state, stranding_move))
+        with self.assertRaisesRegex(ValueError, "right laser"):
+            game.apply_move(state, stranding_move)
 
     def test_simultaneous_beams_destroy_a_shared_shield_once(self):
         game = Game()
