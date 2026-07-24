@@ -157,6 +157,7 @@ class LaserWarGame:
         self.hover_cell: tuple[int, int] | None = None
         self.legal_moves: set[Move] = set()
         self.animation: MoveAnimation | None = None
+        self.final_animation: MoveAnimation | None = None
         self.animation_speed = 1.0
         self.particles: list[Particle] = []
         self.toast = ""
@@ -247,7 +248,10 @@ class LaserWarGame:
                 self.audio.play("impact" if self.animation.record.outcome.destroyed else "laser")
                 self._spawn_damage_particles(self.animation.record)
             if self.animation.elapsed >= 1.15:
-                winner = self.animation.record.outcome.state.winner
+                completed = self.animation
+                winner = completed.record.outcome.state.winner
+                if winner or completed.record.outcome.state.draw:
+                    self.final_animation = completed
                 self.animation = None
                 if winner:
                     self.audio.play("victory")
@@ -370,7 +374,7 @@ class LaserWarGame:
         self._draw_side_panel(mouse)
         if self.paused:
             self._draw_pause(mouse)
-        elif self.session.state.winner or self.session.state.draw:
+        elif (self.session.state.winner or self.session.state.draw) and not self.animation:
             self._draw_result(mouse)
 
     def _draw_board(self) -> None:
@@ -420,8 +424,11 @@ class LaserWarGame:
                 self.canvas.blit(overlay, rect)
                 self._draw_mirror(rect, self.selected_mirror, ghost=True)
 
-        if self.animation:
-            self._draw_beam_animation(self.animation)
+        visible_beams = self.animation
+        if visible_beams is None and (self.session.state.winner or self.session.state.draw):
+            visible_beams = self.final_animation
+        if visible_beams:
+            self._draw_beam_animation(visible_beams)
         self._draw_particles()
 
     def _draw_piece(self, cell: Cell, rect: pygame.Rect, row: int, col: int) -> None:
@@ -612,6 +619,8 @@ class LaserWarGame:
 
     def _draw_result(self, mouse: tuple[int, int]) -> None:
         self._draw_overlay()
+        if self.final_animation:
+            self._draw_beam_animation(self.final_animation)
         self.buttons = []
         if self.session.state.draw:
             heading, accent = "DRAW", color("ink")
@@ -680,6 +689,7 @@ class LaserWarGame:
         self._autosave()
 
     def _begin_animation(self, record: TurnRecord) -> None:
+        self.final_animation = None
         self.animation = MoveAnimation(record)
         self.audio.play("place")
         self._refresh_legal_moves()
@@ -708,6 +718,7 @@ class LaserWarGame:
         self.scene = "game"
         self.paused = False
         self.last_search = None
+        self.final_animation = None
         self._refresh_legal_moves()
         self._autosave()
 
@@ -721,6 +732,7 @@ class LaserWarGame:
         self.menu_difficulty = self.session.difficulty
         self.scene = "game"
         self.paused = False
+        self._restore_terminal_animation()
         self._refresh_legal_moves()
         if self._computer_turn():
             self._start_ai()
@@ -728,6 +740,7 @@ class LaserWarGame:
     def _undo(self) -> None:
         self._cancel_ai()
         self.animation = None
+        self.final_animation = None
         if self.session.undo():
             self.audio.play("undo")
             self.last_search = None
@@ -736,9 +749,11 @@ class LaserWarGame:
 
     def _redo(self) -> None:
         self._cancel_ai()
-        if self.session.redo():
+        restored = self.session.redo()
+        if restored:
             self.audio.play("place")
             self.last_search = None
+            self._restore_terminal_animation()
             self._refresh_legal_moves()
             self._autosave()
             if self._computer_turn() and not self.session.redo_stack:
@@ -748,6 +763,7 @@ class LaserWarGame:
         self._cancel_ai()
         self.session.new_game()
         self.animation = None
+        self.final_animation = None
         self.particles.clear()
         self.paused = False
         self.last_search = None
@@ -757,6 +773,7 @@ class LaserWarGame:
     def _return_to_menu(self) -> None:
         self._cancel_ai()
         self.animation = None
+        self.final_animation = None
         self.paused = False
         self.scene = "menu"
 
@@ -768,6 +785,11 @@ class LaserWarGame:
 
     def _refresh_legal_moves(self) -> None:
         self.legal_moves = set(self.session.game.legal_moves(self.session.state))
+
+    def _restore_terminal_animation(self) -> None:
+        self.final_animation = None
+        if (self.session.state.winner or self.session.state.draw) and self.session.history:
+            self.final_animation = MoveAnimation(self.session.history[-1], elapsed=1.15, damage_played=True)
 
     def _human_turn(self) -> bool:
         return self.session.mode == "local" or self.session.state.turn == "bottom"

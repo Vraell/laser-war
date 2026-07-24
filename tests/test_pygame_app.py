@@ -5,11 +5,33 @@ from unittest.mock import Mock
 
 from laser_war.ai import SearchResult
 from laser_war.engine import Cell, Move
-from laser_war.pygame_app import LaserWarGame
+from laser_war.pygame_app import LaserWarGame, MoveAnimation
 from laser_war.session import GameSession
 
 
 class PygameAppTests(unittest.TestCase):
+    def test_final_volley_is_retained_after_winning_animation(self):
+        app = LaserWarGame.__new__(LaserWarGame)
+        app.scene = "game"
+        app.paused = False
+        app.particles = []
+        app.session = GameSession(mode="local")
+        app.session.play(Move(4, 4, Cell.MIRROR_SLASH), "Bottom")
+        app.session.play(Move(0, 0, Cell.MIRROR_SLASH), "Top")
+        winning = app.session.play(Move(4, 5, Cell.MIRROR_SLASH), "Bottom")
+        app.animation = MoveAnimation(winning, elapsed=1.15, damage_played=True)
+        app.final_animation = None
+        app.animation_speed = 1.0
+        app.ai_future = None
+        app.audio = Mock()
+
+        app._update(0)
+
+        self.assertEqual(app.session.state.winner, "bottom")
+        self.assertIsNone(app.animation)
+        self.assertIsNotNone(app.final_animation)
+        self.assertEqual(app.final_animation.record, winning)
+
     def test_computer_game_redo_restores_exactly_one_move_per_click(self):
         app = LaserWarGame.__new__(LaserWarGame)
         app.session = GameSession(mode="computer")
