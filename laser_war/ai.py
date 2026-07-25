@@ -23,7 +23,7 @@ DIFFICULTIES = {
     "easy": DifficultyProfile("Easy", 0.20, 1, 5),
     "medium": DifficultyProfile("Medium", 1.25, 3, 1),
     "hard": DifficultyProfile("Hard", 3.50, 5, 1),
-    "ultra": DifficultyProfile("Ultra", 10.0, 4, 1, 24, (22, 12, 8)),
+    "ultra": DifficultyProfile("Ultra", 15.0, 4, 1, 24, (22, 12, 8)),
 }
 
 

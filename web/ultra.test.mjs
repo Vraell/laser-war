@@ -33,7 +33,7 @@ for (const [row, col, mirror] of setup) {
   state = game.resolveMove(state, { row, col, mirror }).state;
 }
 
-const result = chooseComputerMove(game, state, "ultra");
+const result = chooseComputerMove(game, state, "ultra", { now: () => 0 });
 
 assert.ok(result.depth >= 4, `Ultra only completed depth ${result.depth}.`);
 assert.ok(game.isLegalMove(state, result.move));

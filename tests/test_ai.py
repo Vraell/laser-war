@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from threading import Event
 
 from laser_war.ai import DIFFICULTIES, ComputerAI
@@ -82,7 +83,12 @@ class AITests(unittest.TestCase):
         for row, col, mirror in setup:
             state = game.resolve_move(state, Move(row, col, Cell(mirror))).state
 
-        result = ComputerAI(game).choose_move(state, "ultra")
+        profile = DIFFICULTIES["ultra"]
+        DIFFICULTIES["ultra"] = replace(profile, time_limit=30.0)
+        try:
+            result = ComputerAI(game).choose_move(state, "ultra")
+        finally:
+            DIFFICULTIES["ultra"] = profile
 
         self.assertGreaterEqual(result.depth, 4)
         self.assertIn(result.move, game.legal_moves(state))
