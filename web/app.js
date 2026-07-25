@@ -1,14 +1,19 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.0";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.1";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.0";
-import { loadProgress, recordResult, saveProgress } from "./progress.js?v=0.11.0";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.0";
-import { beamPoints } from "./beam.js?v=0.11.0";
-import { drawDetailKey } from "./result.js?v=0.11.0";
+} from "./save.js?v=0.11.1";
+import {
+  loadProgress,
+  recordResult,
+  recoverUltraProgress,
+  saveProgress,
+} from "./progress.js?v=0.11.1";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.1";
+import { beamPoints } from "./beam.js?v=0.11.1";
+import { drawDetailKey } from "./result.js?v=0.11.1";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -209,7 +214,7 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.11.0", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.11.1", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
     finishComputerTurn(data.result);
@@ -695,6 +700,7 @@ function updateProgressUI() {
 function migrateStoredSave() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (recoverUltraProgress(progress, data)) saveProgress(localStorage, progress);
     if (data?.version !== SAVE_VERSION) return;
     const restored = sessionFromSave(data);
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(restored)));

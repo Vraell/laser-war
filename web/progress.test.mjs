@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import { loadProgress, recordResult, saveProgress } from "./progress.js";
+import {
+  loadProgress,
+  recordResult,
+  recoverUltraProgress,
+  saveProgress,
+} from "./progress.js";
 
 class MemoryStorage {
   constructor() {
@@ -28,5 +33,11 @@ saveProgress(storage, progress);
 assert.equal(loadProgress(storage).ultraUnlocked, true);
 storage.setItem("laser-war.progress.v1", JSON.stringify({ version: 999, ultraUnlocked: true }));
 assert.equal(loadProgress(storage).ultraUnlocked, true);
+
+const recovered = { ultraUnlocked: false };
+assert.equal(recoverUltraProgress(recovered, { version: 2, difficulty: "ultra" }), true);
+assert.equal(recovered.ultraUnlocked, true);
+assert.equal(recoverUltraProgress(recovered, { version: 2, difficulty: "ultra" }), false);
+assert.equal(recoverUltraProgress({ ultraUnlocked: false }, { difficulty: "hard" }), false);
 
 console.log("Web progress checks passed.");

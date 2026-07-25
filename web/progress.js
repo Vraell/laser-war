@@ -25,6 +25,13 @@ export function saveProgress(storage, progress) {
   }));
 }
 
+/** Recover an earned Ultra unlock from a legacy active Ultra match. */
+export function recoverUltraProgress(progress, activeSave) {
+  if (progress.ultraUnlocked || activeSave?.difficulty !== "ultra") return false;
+  progress.ultraUnlocked = true;
+  return true;
+}
+
 /** Unlock Ultra after the first qualifying Hard-mode victory. */
 export function recordResult(progress, { mode, difficulty, winner }) {
   if (progress.ultraUnlocked || mode !== "computer" || difficulty !== "hard" || winner !== "bottom") {
