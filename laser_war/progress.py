@@ -15,6 +15,7 @@ class Progress:
 
     @classmethod
     def load(cls, path: Path) -> Progress:
+        """Load validated unlock progress or return a locked default."""
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -24,6 +25,7 @@ class Progress:
         return cls(ultra_unlocked=bool(data.get("ultra_unlocked")))
 
     def save(self, path: Path) -> None:
+        """Persist unlock progress atomically."""
         write_json_atomic(
             path,
             {
@@ -33,6 +35,7 @@ class Progress:
         )
 
     def record_result(self, *, mode: str, difficulty: str, winner: str | None) -> bool:
+        """Unlock Ultra after the first qualifying Hard-mode victory."""
         if self.ultra_unlocked or mode != "computer" or difficulty != "hard" or winner != "bottom":
             return False
         self.ultra_unlocked = True

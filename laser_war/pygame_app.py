@@ -11,7 +11,7 @@ import pygame
 
 from .ai import DIFFICULTIES, ComputerAI, SearchResult
 from .audio import AudioBank
-from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move, State
+from .engine import BOARD_SIZE, MIDDLE_ROW, BeamResult, Cell, Move, State
 from .i18n import translate
 from .paths import MATCH_LOG_DIRECTORY, PREFERENCES_PATH, PROGRESS_PATH, SAVE_PATH
 from .preferences import Preferences
@@ -22,6 +22,10 @@ DESIGN_SIZE = (1280, 800)
 FPS = 60
 BOARD_RECT = pygame.Rect(76, 98, 612, 612)
 CELL_SIZE = BOARD_RECT.width // BOARD_SIZE
+BEAM_TRAVEL_START_SECONDS = 0.12
+BEAM_TRAVEL_SECONDS = 0.48
+BEAM_HOLD_SECONDS = 0.30
+MOVE_ANIMATION_SECONDS = BEAM_TRAVEL_START_SECONDS + BEAM_TRAVEL_SECONDS + BEAM_HOLD_SECONDS
 
 COLORS = {
     "ink": "#e7edf1",
@@ -51,11 +55,13 @@ def color(name: str) -> pygame.Color:
 
 class CrispFont:
     def __init__(self, path: Path, size: int, *, bold: bool = False, scale: int = 2):
+        """Render fonts supersampled for crisp downscaled text."""
         self.scale = scale
         self.font = pygame.font.Font(path, size * scale)
         self.font.set_bold(bold)
 
     def render(self, value: str, antialias: bool, foreground: pygame.Color) -> pygame.Surface:
+        """Render text at high resolution and downscale it cleanly."""
         rendered = self.font.render(value, antialias, foreground)
         target_size = (
             max(1, round(rendered.get_width() / self.scale)),
@@ -64,6 +70,7 @@ class CrispFont:
         return pygame.transform.smoothscale(rendered, target_size)
 
     def size(self, value: str) -> tuple[int, int]:
+        """Measure text in final display pixels."""
         width, height = self.font.size(value)
         return round(width / self.scale), round(height / self.scale)
 
@@ -81,6 +88,7 @@ class Button:
     danger: bool = False
 
     def draw(self, surface: pygame.Surface, font: CrispFont, mouse: tuple[int, int]) -> None:
+        """Draw the button for its enabled, selected, and hover state."""
         hovered = self.enabled and self.rect.collidepoint(mouse)
         if not self.enabled:
             fill = color("panel_light")
@@ -100,6 +108,7 @@ class Button:
         surface.blit(text, text.get_rect(center=self.rect.center))
 
     def click(self, position: tuple[int, int]) -> bool:
+        """Invoke the action when an enabled button contains the click."""
         if self.enabled and self.rect.collidepoint(position):
             self.action()
             return True
@@ -114,6 +123,7 @@ class MoveAnimation:
 
     @property
     def placed_board(self) -> tuple[tuple[Cell, ...], ...]:
+        """Return the pre-damage board with the new mirror placed."""
         board = [list(row) for row in self.record.before.board]
         move = self.record.move
         board[move.row][move.col] = move.mirror
@@ -131,6 +141,7 @@ class Particle:
 
 class LaserWarGame:
     def __init__(self) -> None:
+        """Initialize Pygame, persistent state, rendering assets, and AI resources."""
         pygame.mixer.pre_init(44_100, -16, 1, 512)
         pygame.init()
         pygame.display.set_caption("Laser War")
@@ -178,11 +189,13 @@ class LaserWarGame:
         self._refresh_legal_moves()
 
     def _load_background(self) -> pygame.Surface:
+        """Load and scale the main-menu background artwork."""
         path = Path(__file__).parent / "assets" / "menu-background.png"
         image = pygame.image.load(path).convert()
         return pygame.transform.smoothscale(image, DESIGN_SIZE)
 
     def run(self) -> None:
+        """Run the fixed-rate event, update, draw, and present loop."""
         while self.running:
             dt = min(self.clock.tick(FPS) / 1000.0, 0.05)
             mouse = self._virtual_mouse()
@@ -193,11 +206,13 @@ class LaserWarGame:
         self.close()
 
     def close(self) -> None:
+        """Cancel background work and release Pygame resources."""
         self.ai_cancel.set()
         self.ai_executor.shutdown(wait=False, cancel_futures=True)
         pygame.quit()
 
     def _virtual_mouse(self) -> tuple[int, int]:
+        """Map window-space mouse coordinates into the design canvas."""
         window_w, window_h = self.window.get_size()
         scale = min(window_w / DESIGN_SIZE[0], window_h / DESIGN_SIZE[1])
         width, height = DESIGN_SIZE[0] * scale, DESIGN_SIZE[1] * scale
@@ -207,6 +222,7 @@ class LaserWarGame:
         return int((mouse_x - offset_x) / scale), int((mouse_y - offset_y) / scale)
 
     def _handle_events(self, mouse: tuple[int, int]) -> None:
+        """Dispatch queued window, keyboard, and pointer events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
@@ -218,6 +234,7 @@ class LaserWarGame:
         self.hover_cell = self._cell_at(mouse) if self.scene == "game" else None
 
     def _handle_key(self, key: int) -> None:
+        """Apply scene-aware keyboard controls."""
         if key == pygame.K_ESCAPE:
             if self.scene == "game":
                 self.paused = not self.paused
@@ -235,6 +252,7 @@ class LaserWarGame:
             self._restart()
 
     def _handle_click(self, mouse: tuple[int, int]) -> None:
+        """Dispatch a click to controls before attempting a board move."""
         for button in reversed(self.buttons):
             if button.click(mouse):
                 return
@@ -244,6 +262,7 @@ class LaserWarGame:
                 self._play_human_move(cell)
 
     def _update(self, dt: float) -> None:
+        """Advance animation, particles, and completed AI searches."""
         self._update_particles(dt)
         if self.scene != "game" or self.paused:
             return
@@ -253,7 +272,7 @@ class LaserWarGame:
                 self.animation.damage_played = True
                 self.audio.play("impact" if self.animation.record.outcome.destroyed else "laser")
                 self._spawn_damage_particles(self.animation.record)
-            if self.animation.elapsed >= 1.15:
+            if self.animation.elapsed >= MOVE_ANIMATION_SECONDS:
                 completed = self.animation
                 winner = completed.record.outcome.state.winner
                 if winner or completed.record.outcome.state.draw:
@@ -293,6 +312,7 @@ class LaserWarGame:
             self._autosave()
 
     def _draw(self, mouse: tuple[int, int]) -> None:
+        """Render the active scene and any transient toast."""
         self.buttons = []
         if self.scene == "menu":
             self._draw_menu(mouse)
@@ -304,6 +324,7 @@ class LaserWarGame:
             self._draw_toast()
 
     def _present(self) -> None:
+        """Scale the design canvas into the current window with letterboxing."""
         window_w, window_h = self.window.get_size()
         scale = min(window_w / DESIGN_SIZE[0], window_h / DESIGN_SIZE[1])
         size = (int(DESIGN_SIZE[0] * scale), int(DESIGN_SIZE[1] * scale))
@@ -313,6 +334,7 @@ class LaserWarGame:
         pygame.display.flip()
 
     def _draw_menu(self, mouse: tuple[int, int]) -> None:
+        """Render the localized main menu and its controls."""
         self.canvas.blit(self.background, (0, 0))
         shade = pygame.Surface(DESIGN_SIZE, pygame.SRCALPHA)
         shade.fill((3, 7, 10, 72))
@@ -385,10 +407,11 @@ class LaserWarGame:
         ]
         self._add_buttons(language_buttons, mouse)
 
-        version = self.fonts["tiny"].render("v0.5", True, color("muted"))
+        version = self.fonts["tiny"].render("v0.6", True, color("muted"))
         self.canvas.blit(version, (448, 757))
 
     def _draw_rules(self, mouse: tuple[int, int]) -> None:
+        """Render the localized rules reference screen."""
         self.canvas.fill(color("background"))
         pygame.draw.rect(self.canvas, color("panel"), (0, 0, 1280, 800))
         self._text(self._t("how_to_play"), self.fonts["h1"], color("ink"), (76, 58))
@@ -418,6 +441,7 @@ class LaserWarGame:
         self._add_button(Button(pygame.Rect(76, 708, 180, 48), self._t("back"), self._show_menu), mouse)
 
     def _draw_game(self, mouse: tuple[int, int]) -> None:
+        """Render the board, side panel, and active modal state."""
         self.canvas.fill(color("background"))
         pygame.draw.rect(self.canvas, color("panel"), (732, 0, 548, 800))
         self._draw_board()
@@ -428,6 +452,7 @@ class LaserWarGame:
             self._draw_result(mouse)
 
     def _draw_board(self) -> None:
+        """Render board cells, pieces, legal markers, beams, and particles."""
         board = self.session.state.board
         if self.animation and self.animation.elapsed < 0.58:
             board = self.animation.placed_board
@@ -482,6 +507,7 @@ class LaserWarGame:
         self._draw_particles()
 
     def _draw_piece(self, cell: Cell, rect: pygame.Rect, row: int, col: int) -> None:
+        """Dispatch one occupied cell to its piece renderer."""
         if cell == Cell.EMPTY:
             return
         if cell in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH):
@@ -492,6 +518,7 @@ class LaserWarGame:
             self._draw_king(rect, cell == Cell.TOP_KING)
 
     def _draw_mirror(self, rect: pygame.Rect, mirror: Cell, ghost: bool = False) -> None:
+        """Draw a slash-oriented glass mirror inside a cell."""
         margin = 14
         if mirror == Cell.MIRROR_SLASH:
             start, end = (rect.left + margin, rect.bottom - margin), (rect.right - margin, rect.top + margin)
@@ -507,6 +534,7 @@ class LaserWarGame:
         self.canvas.blit(layer, rect)
 
     def _draw_shield(self, rect: pygame.Rect) -> None:
+        """Draw a shield token with its glassy inner mark."""
         center = pygame.Vector2(rect.center)
         radius = 23
         points = [center + pygame.Vector2(radius, 0).rotate(index * 45) for index in range(8)]
@@ -522,6 +550,7 @@ class LaserWarGame:
         )
 
     def _draw_king(self, rect: pygame.Rect, top: bool) -> None:
+        """Draw a color-coded king plate and crown."""
         accent = color("blue" if top else "amber")
         plate = rect.inflate(-18, -18)
         fill = pygame.Color("#176f82") if top else pygame.Color("#a66a10")
@@ -541,6 +570,7 @@ class LaserWarGame:
         pygame.draw.line(self.canvas, pygame.Color("white"), (cx - 17, cy + 5), (cx + 17, cy + 5), 2)
 
     def _draw_sources(self) -> None:
+        """Draw both laser emitters aligned to the middle row."""
         y = BOARD_RECT.top + MIDDLE_ROW * CELL_SIZE + CELL_SIZE // 2
         for x, beam_color, direction in (
             (BOARD_RECT.left - 40, color("red"), 1),
@@ -562,6 +592,7 @@ class LaserWarGame:
             )
 
     def _draw_coordinates(self) -> None:
+        """Draw one-based row and column labels around the board."""
         for index in range(BOARD_SIZE):
             label = self.fonts["tiny"].render(str(index + 1), True, color("muted"))
             x = BOARD_RECT.left + index * CELL_SIZE + CELL_SIZE // 2
@@ -570,14 +601,32 @@ class LaserWarGame:
             self.canvas.blit(label, label.get_rect(center=(BOARD_RECT.left - 24, y)))
 
     def _draw_beam_animation(self, animation: MoveAnimation) -> None:
-        progress = min(1.0, max(0.0, (animation.elapsed - 0.12) / 0.48))
+        """Draw both beams at their current travel progress."""
+        progress = min(
+            1.0,
+            max(0.0, (animation.elapsed - BEAM_TRAVEL_START_SECONDS) / BEAM_TRAVEL_SECONDS),
+        )
         for index, beam in enumerate(animation.record.outcome.beams):
             beam_color = color("red" if index == 0 else "blue")
-            source_x = BOARD_RECT.left - 40 if index == 0 else BOARD_RECT.right + 40
-            source_y = BOARD_RECT.top + MIDDLE_ROW * CELL_SIZE + CELL_SIZE // 2
-            points = [(source_x, source_y)]
-            points.extend(self._cell_rect(row, col).center for row, col, _direction in beam.path)
-            self._draw_partial_line(points, progress, beam_color)
+            self._draw_partial_line(self._beam_points(beam, index), progress, beam_color)
+
+    def _beam_points(self, beam: BeamResult, source_index: int) -> list[tuple[int, int]]:
+        """Convert a traced beam into render points that reach the board edge."""
+        source_x = BOARD_RECT.left - 40 if source_index == 0 else BOARD_RECT.right + 40
+        source_y = BOARD_RECT.top + MIDDLE_ROW * CELL_SIZE + CELL_SIZE // 2
+        points = [(source_x, source_y)]
+        points.extend(self._cell_rect(row, col).center for row, col, _direction in beam.path)
+        if beam.exited and beam.path:
+            row, col, direction = beam.path[-1]
+            x, y = self._cell_rect(row, col).center
+            edge = {
+                "N": (x, BOARD_RECT.top),
+                "E": (BOARD_RECT.right, y),
+                "S": (x, BOARD_RECT.bottom),
+                "W": (BOARD_RECT.left, y),
+            }
+            points.append(edge[direction])
+        return points
 
     def _draw_partial_line(
         self,
@@ -585,6 +634,7 @@ class LaserWarGame:
         progress: float,
         beam_color: pygame.Color,
     ) -> None:
+        """Draw a glowing polyline up to a normalized path progress."""
         if len(points) < 2 or progress <= 0:
             return
         segment_progress = progress * (len(points) - 1)
@@ -600,6 +650,7 @@ class LaserWarGame:
             pygame.draw.lines(self.canvas, beam_color, False, visible, 4)
 
     def _draw_side_panel(self, mouse: tuple[int, int]) -> None:
+        """Render status, mirror controls, match history, and footer actions."""
         status, status_color = self._status()
         self._text(self._t("match_status"), self.fonts["tiny"], color("muted"), (780, 36))
         pygame.draw.circle(self.canvas, status_color, (789, 82), 6)
@@ -675,6 +726,7 @@ class LaserWarGame:
         self._add_buttons(footer_buttons, mouse)
 
     def _draw_pause(self, mouse: tuple[int, int]) -> None:
+        """Render the pause overlay and its actions."""
         self._draw_overlay()
         self.buttons = []
         self._text(self._t("paused"), self.fonts["h1"], color("ink"), (548, 230))
@@ -686,6 +738,7 @@ class LaserWarGame:
         self._add_buttons(buttons, mouse)
 
     def _draw_result(self, mouse: tuple[int, int]) -> None:
+        """Render the terminal result while redrawing the final volley above it."""
         self._draw_overlay()
         if self.final_animation:
             self._draw_beam_animation(self.final_animation)
@@ -718,11 +771,13 @@ class LaserWarGame:
         self._add_buttons(buttons, mouse)
 
     def _draw_overlay(self) -> None:
+        """Dim the current game view behind a modal state."""
         overlay = pygame.Surface(DESIGN_SIZE, pygame.SRCALPHA)
         overlay.fill((5, 8, 10, 210))
         self.canvas.blit(overlay, (0, 0))
 
     def _draw_toast(self) -> None:
+        """Render the current transient message at the bottom edge."""
         text = self.fonts["body"].render(self.toast, True, pygame.Color("white"))
         rect = text.get_rect(center=(640, 752)).inflate(32, 20)
         pygame.draw.rect(self.canvas, color("panel_light"), rect, border_radius=6)
@@ -730,6 +785,7 @@ class LaserWarGame:
         self.canvas.blit(text, text.get_rect(center=rect.center))
 
     def _update_particles(self, dt: float) -> None:
+        """Advance particles and discard expired effects."""
         alive = []
         for particle in self.particles:
             particle.life -= dt
@@ -741,6 +797,7 @@ class LaserWarGame:
         self.particles = alive
 
     def _spawn_damage_particles(self, record: TurnRecord) -> None:
+        """Spawn deterministic impact particles at every destroyed shield."""
         for row, col in record.outcome.destroyed:
             center = pygame.Vector2(self._cell_rect(row, col).center)
             for index in range(18):
@@ -751,12 +808,20 @@ class LaserWarGame:
                 )
 
     def _draw_particles(self) -> None:
+        """Draw all live particles with life-based size."""
         for particle in self.particles:
             radius = max(1, int(particle.size * particle.life / 0.65))
             pygame.draw.circle(self.canvas, particle.color, particle.position, radius)
 
     def _play_human_move(self, cell: tuple[int, int]) -> None:
-        if not self._human_turn() or self.animation or self.ai_future or self.session.state.winner:
+        """Validate a clicked placement and begin its resolved animation."""
+        if (
+            not self._human_turn()
+            or self.animation
+            or self.ai_future
+            or self.session.state.winner
+            or self.session.state.draw
+        ):
             return
         move = Move(*cell, self.selected_mirror)
         if move not in self.legal_moves:
@@ -771,12 +836,14 @@ class LaserWarGame:
         self._autosave()
 
     def _begin_animation(self, record: TurnRecord) -> None:
+        """Start the placement and laser animation for a recorded move."""
         self.final_animation = None
         self.animation = MoveAnimation(record)
         self.audio.play("place")
         self._refresh_legal_moves()
 
     def _start_ai(self) -> None:
+        """Submit a cancellable computer search for the current state."""
         if not self._computer_turn() or self.ai_future:
             return
         self.ai_cancel = Event()
@@ -788,6 +855,7 @@ class LaserWarGame:
         self.ai_future = self.ai_executor.submit(ai.choose_move, state, difficulty, self.ai_cancel)
 
     def _cancel_ai(self) -> None:
+        """Invalidate any active computer search without blocking the UI."""
         self.ai_cancel.set()
         if self.ai_future:
             self.ai_future.cancel()
@@ -795,6 +863,7 @@ class LaserWarGame:
         self.ai_state = None
 
     def _start_game(self, mode: str) -> None:
+        """Create and autosave a fresh match from the menu selection."""
         self.menu_mode = mode
         self.session.new_game(mode=mode, difficulty=self.menu_difficulty)
         self.ultra_unlocked_this_match = False
@@ -806,6 +875,7 @@ class LaserWarGame:
         self._autosave()
 
     def _continue_game(self) -> None:
+        """Load an autosave, restore terminal visuals, and resume computer play."""
         try:
             self.session = GameSession.load(SAVE_PATH)
         except (OSError, ValueError, KeyError) as exc:
@@ -828,6 +898,7 @@ class LaserWarGame:
             self._start_ai()
 
     def _undo(self) -> None:
+        """Undo at most one move and refresh all derived UI state."""
         self._cancel_ai()
         self.animation = None
         self.final_animation = None
@@ -838,6 +909,7 @@ class LaserWarGame:
             self._autosave()
 
     def _redo(self) -> None:
+        """Redo at most one still-valid move and resume computer play if needed."""
         self._cancel_ai()
         restored = self.session.redo()
         if restored:
@@ -850,6 +922,7 @@ class LaserWarGame:
                 self._start_ai()
 
     def _restart(self) -> None:
+        """Archive the current match and reset it with the same settings."""
         self._cancel_ai()
         self._archive_match("abandoned")
         self.session.new_game()
@@ -863,6 +936,7 @@ class LaserWarGame:
         self._autosave()
 
     def _return_to_menu(self) -> None:
+        """Archive the current match and return to the main menu."""
         self._cancel_ai()
         self._archive_match("abandoned")
         self.animation = None
@@ -871,6 +945,7 @@ class LaserWarGame:
         self.scene = "menu"
 
     def _autosave(self) -> None:
+        """Persist resumable state and the current match record."""
         try:
             self.session.save(SAVE_PATH)
             self.session.save_match_log(MATCH_LOG_DIRECTORY)
@@ -878,6 +953,7 @@ class LaserWarGame:
             self._show_toast(self._t("autosave_failed"))
 
     def _archive_match(self, status: str) -> None:
+        """Write the latest match state with an archive status."""
         try:
             self.session.save_match_log(MATCH_LOG_DIRECTORY, status)
         except OSError:
@@ -887,18 +963,25 @@ class LaserWarGame:
         self.legal_moves = set(self.session.game.legal_moves(self.session.state))
 
     def _restore_terminal_animation(self) -> None:
+        """Reconstruct a completed volley when loading a terminal save."""
         self.final_animation = None
         if (self.session.state.winner or self.session.state.draw) and self.session.history:
-            self.final_animation = MoveAnimation(self.session.history[-1], elapsed=1.15, damage_played=True)
+            self.final_animation = MoveAnimation(
+                self.session.history[-1],
+                elapsed=MOVE_ANIMATION_SECONDS,
+                damage_played=True,
+            )
 
     def _human_turn(self) -> bool:
         return self.session.mode == "local" or self.session.state.turn == "bottom"
 
     def _computer_turn(self) -> bool:
+        """Return whether an unfinished computer match awaits the top side."""
         state = self.session.state
         return self.session.mode == "computer" and state.turn == "top" and not state.winner and not state.draw
 
     def _status(self) -> tuple[str, pygame.Color]:
+        """Return localized status text and the active-side accent color."""
         state = self.session.state
         if state.winner:
             return (
@@ -917,6 +1000,7 @@ class LaserWarGame:
         )
 
     def _cell_at(self, position: tuple[int, int]) -> tuple[int, int] | None:
+        """Map a canvas position to a board cell when it is in bounds."""
         if not BOARD_RECT.collidepoint(position):
             return None
         col = (position[0] - BOARD_RECT.left) // CELL_SIZE
@@ -937,12 +1021,14 @@ class LaserWarGame:
         self.selected_mirror = mirror
 
     def _set_difficulty(self, difficulty: str) -> None:
+        """Select an available computer difficulty or explain its lock."""
         if difficulty == "ultra" and not self.progress.ultra_unlocked:
             self._show_toast(self._t("unlock_instruction"))
             return
         self.menu_difficulty = difficulty
 
     def _set_language(self, language: str) -> None:
+        """Apply and persist the selected interface language."""
         self.preferences.set_language(language)
         try:
             self.preferences.save(PREFERENCES_PATH)
@@ -950,6 +1036,7 @@ class LaserWarGame:
             self._show_toast(self._t("progress_failed"))
 
     def _record_progress(self) -> None:
+        """Record a qualifying result and persist any new unlock."""
         progress = getattr(self, "progress", None)
         if progress is None:
             return
@@ -976,6 +1063,7 @@ class LaserWarGame:
         self.paused = not self.paused
 
     def _t(self, key: str, **values: object) -> str:
+        """Translate a UI key using the active preference."""
         preferences = getattr(self, "preferences", None)
         language = preferences.language if preferences else "en"
         return translate(language, key, **values)
@@ -984,6 +1072,7 @@ class LaserWarGame:
         return f"{count} {self._t('move' if count == 1 else 'moves')}"
 
     def _show_toast(self, message: str) -> None:
+        """Display a transient message for the standard toast duration."""
         self.toast = message
         self.toast_until = monotonic() + 2.8
 
@@ -999,14 +1088,17 @@ class LaserWarGame:
         enabled: bool = True,
         danger: bool = False,
     ) -> None:
+        """Create and draw one full-width main-menu button."""
         self.buttons.append(Button(pygame.Rect(62, y, 388, 48), label, action, selected, enabled, danger))
         self.buttons[-1].draw(self.canvas, self.fonts["body"], self._virtual_mouse())
 
     def _add_button(self, button: Button, mouse: tuple[int, int]) -> None:
+        """Register and draw one interactive button."""
         self.buttons.append(button)
         button.draw(self.canvas, self.fonts["body"], mouse)
 
     def _add_buttons(self, buttons: list[Button], mouse: tuple[int, int]) -> None:
+        """Register and draw a sequence of interactive buttons."""
         for button in buttons:
             self._add_button(button, mouse)
 
@@ -1026,6 +1118,7 @@ class LaserWarGame:
         foreground: pygame.Color,
         rect: pygame.Rect,
     ) -> int:
+        """Wrap text into a rectangle and return the next vertical position."""
         words = value.split()
         lines: list[str] = []
         line = ""

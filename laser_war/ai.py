@@ -42,6 +42,7 @@ class SearchInterrupted(Exception):
 
 class ComputerAI:
     def __init__(self, game: Game, seed: int | None = None):
+        """Initialize reusable search state for one game engine."""
         self.game = game
         self.random = random.Random(seed)
         self.deadline = inf
@@ -59,6 +60,7 @@ class ComputerAI:
         difficulty: str = "medium",
         cancel_event: Event | None = None,
     ) -> SearchResult:
+        """Choose a legal move with iterative deepening under the selected budget."""
         profile = DIFFICULTIES.get(difficulty, DIFFICULTIES["medium"])
         self.profile = profile
         started = monotonic()
@@ -109,6 +111,7 @@ class ComputerAI:
         depth: int,
         legal: list[Move],
     ) -> tuple[float, Move, list[tuple[float, Move]]]:
+        """Score and rank root moves for one completed search depth."""
         alpha = -inf
         beta = inf
         ranked: list[tuple[float, Move]] = []
@@ -127,6 +130,7 @@ class ComputerAI:
         return score, move, ranked
 
     def _negamax(self, state: State, depth: int, alpha: float, beta: float, *, ply: int) -> float:
+        """Evaluate a subtree with alpha-beta negamax and move-order caches."""
         self._check_interrupted()
         self.nodes += 1
         if depth <= 0 or state.winner or state.draw:
@@ -169,6 +173,7 @@ class ComputerAI:
         state: State,
         moves: list[Move] | None = None,
     ) -> list[tuple[Move, State]]:
+        """Return legal children ordered by tactical and historical priority."""
         children = self.children_cache.get(state)
         if children is None:
             children = self.game.legal_children(state)
@@ -185,6 +190,7 @@ class ComputerAI:
         )
 
     def _move_priority(self, state: State, move: Move, child: State, preferred: Move | None) -> float:
+        """Rank a child for search ordering without changing its game value."""
         if child.winner == state.turn:
             return 1_000_000
         if child.draw:
@@ -204,11 +210,13 @@ class ComputerAI:
         return principal + terminal + self.history.get(move, 0) + adjacent_mirrors * 20
 
     def _branch_limit(self, ply: int) -> int | None:
+        """Return the configured selective-search width for a ply."""
         if not self.profile.branch_limits:
             return None
         index = min(max(0, ply - 1), len(self.profile.branch_limits) - 1)
         return self.profile.branch_limits[index]
 
     def _check_interrupted(self) -> None:
+        """Abort promptly when the search deadline or cancellation flag is reached."""
         if monotonic() >= self.deadline or (self.cancel_event and self.cancel_event.is_set()):
             raise SearchInterrupted

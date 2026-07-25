@@ -11,6 +11,7 @@ SAMPLE_RATE = 44_100
 
 class AudioBank:
     def __init__(self) -> None:
+        """Build the synthesized sound bank when an audio device is available."""
         self.enabled = True
         self.available = pygame.mixer.get_init() is not None
         self.sounds: dict[str, pygame.mixer.Sound] = {}
@@ -25,6 +26,7 @@ class AudioBank:
         }
 
     def play(self, name: str) -> None:
+        """Play a named effect when sound output is enabled."""
         if self.enabled and self.available and name in self.sounds:
             self.sounds[name].play()
 
@@ -32,10 +34,12 @@ class AudioBank:
         self.enabled = not self.enabled
 
     def _sound(self, samples: list[float]) -> pygame.mixer.Sound:
+        """Convert normalized floating-point samples into a Pygame sound."""
         pcm = array("h", (max(-32767, min(32767, int(sample * 32767))) for sample in samples))
         return pygame.mixer.Sound(buffer=pcm.tobytes())
 
     def _tone(self, frequency: float, duration: float, volume: float) -> pygame.mixer.Sound:
+        """Synthesize a decaying sine tone."""
         count = int(SAMPLE_RATE * duration)
         samples = [
             sin(2 * pi * frequency * index / SAMPLE_RATE) * volume * (1 - index / count) for index in range(count)
@@ -43,6 +47,7 @@ class AudioBank:
         return self._sound(samples)
 
     def _sweep(self, start: float, end: float, duration: float, volume: float) -> pygame.mixer.Sound:
+        """Synthesize a frequency sweep with a smooth amplitude envelope."""
         count = int(SAMPLE_RATE * duration)
         phase = 0.0
         samples = []
@@ -55,12 +60,14 @@ class AudioBank:
         return self._sound(samples)
 
     def _noise(self, duration: float, volume: float) -> pygame.mixer.Sound:
+        """Synthesize deterministic decaying noise for impact feedback."""
         generator = random.Random(7)
         count = int(SAMPLE_RATE * duration)
         samples = [generator.uniform(-1, 1) * volume * (1 - index / count) ** 2 for index in range(count)]
         return self._sound(samples)
 
     def _chord(self, frequencies: tuple[float, ...], duration: float, volume: float) -> pygame.mixer.Sound:
+        """Synthesize an enveloped chord from the supplied frequencies."""
         count = int(SAMPLE_RATE * duration)
         samples = []
         for index in range(count):

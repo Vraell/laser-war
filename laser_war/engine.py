@@ -80,12 +80,14 @@ class MoveOutcome:
 
 class IllegalMoveError(ValueError):
     def __init__(self, reason: str, message: str):
+        """Attach a stable UI-facing reason code to an illegal move."""
         super().__init__(message)
         self.reason = reason
 
 
 class Game:
     def __init__(self, size: int = BOARD_SIZE):
+        """Initialize the fixed board geometry and reachability cache."""
         if size != 9:
             raise ValueError("This reconstruction currently supports only the 9x9 board.")
         self.size = size
@@ -97,6 +99,7 @@ class Game:
         ] = OrderedDict()
 
     def initial_state(self, turn: str = "bottom") -> State:
+        """Create the symmetric opening position for a new match."""
         board = [[Cell.EMPTY for _ in range(self.size)] for _ in range(self.size)]
 
         board[0][4] = Cell.TOP_KING
@@ -113,6 +116,7 @@ class Game:
         return [move for move, _child in self.legal_children(state)]
 
     def legal_children(self, state: State) -> list[tuple[Move, State]]:
+        """Return each legal move paired with its fully resolved child state."""
         children: list[tuple[Move, State]] = []
         for move in self._pseudo_moves(state):
             try:
@@ -123,6 +127,7 @@ class Game:
         return children
 
     def is_legal_move(self, state: State, move: Move) -> bool:
+        """Check a move against placement, firing, and path-preservation rules."""
         try:
             self.resolve_move(state, move, check_no_legal_moves=False)
         except ValueError:
@@ -130,6 +135,7 @@ class Game:
         return True
 
     def illegal_move_reason(self, state: State, move: Move) -> str | None:
+        """Return a stable rejection reason or None when the move is legal."""
         try:
             self.resolve_move(state, move, check_no_legal_moves=False)
         except IllegalMoveError as error:
@@ -142,18 +148,24 @@ class Game:
         return self.resolve_move(state, move).state
 
     def resolve_move(self, state: State, move: Move, check_no_legal_moves: bool = True) -> MoveOutcome:
+        """Place a mirror, fire both lasers, apply damage, and validate paths."""
         if state.winner or state.draw:
             raise IllegalMoveError("game_over", "The game is already over.")
         if move.mirror not in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH):
             raise IllegalMoveError("invalid_mirror", "A move must place either '/' or '\\'.")
         if not self._in_bounds(move.row, move.col):
             raise IllegalMoveError("outside_board", "Move is outside the board.")
+        occupied = state.board[move.row][move.col]
+        if occupied != Cell.EMPTY:
+            if occupied in (Cell.TOP_KING, Cell.BOTTOM_KING):
+                raise IllegalMoveError("occupied_king", "No mirror can be placed on a king.")
+            if occupied == Cell.SHIELD:
+                raise IllegalMoveError("occupied_shield", "No mirror can be placed on a shield.")
+            raise IllegalMoveError("occupied", "Move square is not empty.")
         if (move.row, move.col) in self.mirror_forbidden_squares(state.board):
             if (move.row, move.col) in self.laser_entry_squares:
                 raise IllegalMoveError("laser_entry", "No mirror can be placed directly in front of a laser.")
             raise IllegalMoveError("king_adjacent", "No mirror can be placed adjacent to a king.")
-        if state.board[move.row][move.col] != Cell.EMPTY:
-            raise IllegalMoveError("occupied", "Move square is not empty.")
 
         board = [list(row) for row in state.board]
         board[move.row][move.col] = move.mirror
@@ -210,6 +222,7 @@ class Game:
         return tuple(self._trace_beam(board, source) for source in self.sources)  # type: ignore[return-value]
 
     def best_move(self, state: State, depth: int = 2) -> tuple[Move | None, float]:
+        """Return a deterministic fixed-depth move for CLI and baseline use."""
         moves = self.legal_moves(state)
         if not moves:
             return None, self.evaluate(state)
@@ -228,6 +241,7 @@ class Game:
         return best, best_score
 
     def king_adjacent_squares(self, board: tuple[tuple[Cell, ...], ...]) -> frozenset[tuple[int, int]]:
+        """Derive every square where a mirror would touch either king."""
         squares = set()
         kings = (Cell.TOP_KING, Cell.BOTTOM_KING)
         for row in range(self.size):
@@ -244,6 +258,7 @@ class Game:
         return self.laser_entry_squares | self.king_adjacent_squares(board)
 
     def evaluate(self, state: State) -> float:
+        """Score a position from the side-to-move perspective."""
         if state.draw:
             return 0
         if state.winner == state.turn:
@@ -271,6 +286,7 @@ class Game:
         return score
 
     def render(self, state: State, show_coords: bool = False) -> str:
+        """Render a state as a compact text board for diagnostics and CLI use."""
         lines = []
         if show_coords:
             lines.append("    " + " ".join(str(i) for i in range(self.size)))
@@ -291,6 +307,7 @@ class Game:
         self,
         board: tuple[tuple[Cell, ...], ...],
     ) -> tuple[frozenset[str], frozenset[str]]:
+        """Return the kings each laser could still reach after future placements."""
         cached = self._reachability_cache.get(board)
         if cached is not None:
             self._reachability_cache.move_to_end(board)
@@ -308,6 +325,7 @@ class Game:
         board: tuple[tuple[Cell, ...], ...],
         source: tuple[int, int, str],
     ) -> frozenset[str]:
+        """Explore all legal future beam turns from one laser source."""
         forbidden_turns = self.mirror_forbidden_squares(board)
         reachable = set()
         seen = set()
@@ -343,6 +361,7 @@ class Game:
         return frozenset(reachable)
 
     def _trace_beam(self, board: tuple[tuple[Cell, ...], ...], source: tuple[int, int, str]) -> BeamResult:
+        """Trace one fired laser until it exits, loops, or strikes a piece."""
         r, c, direction = source
         visited = set()
         path = []
@@ -376,6 +395,7 @@ class Game:
                 return BeamResult(tuple(path), hit_king="bottom")
 
     def _search(self, state: State, depth: int, alpha: float, beta: float) -> float:
+        """Evaluate a fixed-depth subtree with alpha-beta negamax."""
         if depth <= 0 or state.winner or state.draw:
             return self.evaluate(state)
 
@@ -393,6 +413,7 @@ class Game:
         return value
 
     def _pseudo_moves(self, state: State) -> Iterable[Move]:
+        """Generate empty placements before expensive path validation."""
         if state.winner or state.draw:
             return
         forbidden = self.mirror_forbidden_squares(state.board)
@@ -405,6 +426,7 @@ class Game:
                     yield Move(r, c, Cell.MIRROR_BACKSLASH)
 
     def _nearby_shields(self, board: tuple[tuple[Cell, ...], ...], king: Cell) -> int:
+        """Count shields in the evaluation radius around a king."""
         king_pos = None
         for r in range(self.size):
             for c in range(self.size):
@@ -424,6 +446,7 @@ class Game:
         return count
 
     def _turns(self, direction: str) -> tuple[str, str]:
+        """Return the two perpendicular directions available to a future mirror."""
         if direction in ("N", "S"):
             return ("E", "W")
         return ("N", "S")

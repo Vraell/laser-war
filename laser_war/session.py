@@ -27,6 +27,7 @@ class TurnRecord:
         return self.summary_for("en")
 
     def summary_for(self, language: str) -> str:
+        """Render this turn as a localized human-readable log line."""
         effects: list[str] = []
         if self.outcome.destroyed:
             positions = ", ".join(
@@ -52,6 +53,7 @@ class TurnRecord:
         )
 
     def _actor_label(self, language: str) -> str:
+        """Translate canonical and legacy actor names for display."""
         actor = self.actor.lower()
         if actor in {"you", "vous"}:
             return translate(language, "you")
@@ -72,6 +74,7 @@ class GameSession:
         mode: str = "computer",
         difficulty: str = "medium",
     ):
+        """Create a fresh match session around a rules engine."""
         self.game = game or Game()
         self.mode = mode
         self.difficulty = difficulty
@@ -83,6 +86,7 @@ class GameSession:
         self.events: list[dict[str, Any]] = []
 
     def new_game(self, *, mode: str | None = None, difficulty: str | None = None) -> None:
+        """Reset all match state while optionally changing mode or difficulty."""
         if mode is not None:
             self.mode = mode
         if difficulty is not None:
@@ -95,6 +99,7 @@ class GameSession:
         self.events.clear()
 
     def play(self, move: Move, actor: str) -> TurnRecord:
+        """Resolve and record one move as the next immutable turn."""
         before = self.state
         outcome = self.game.resolve_move(before, move)
         record = TurnRecord(len(self.history) + 1, actor, before, move, outcome)
@@ -105,6 +110,7 @@ class GameSession:
         return record
 
     def undo(self, plies: int = 1) -> list[TurnRecord]:
+        """Move recent turns onto the redo stack and restore prior state."""
         undone: list[TurnRecord] = []
         for _ in range(min(plies, len(self.history))):
             record = self.history.pop()
@@ -115,6 +121,7 @@ class GameSession:
         return undone
 
     def redo(self, plies: int = 1) -> list[TurnRecord]:
+        """Revalidate and restore turns from the redo stack."""
         restored: list[TurnRecord] = []
         for _ in range(min(plies, len(self.redo_stack))):
             old_record = self.redo_stack[-1]
@@ -151,6 +158,7 @@ class GameSession:
         write_json_atomic(path, self.to_dict())
 
     def to_match_dict(self, status: str = "active") -> dict[str, Any]:
+        """Serialize a complete match record for durable history."""
         completed = bool(self.state.winner or self.state.draw)
         resolved_status = "completed" if completed else status
         timestamp = self._now()
@@ -184,6 +192,7 @@ class GameSession:
         }
 
     def save_match_log(self, directory: Path, status: str = "active") -> Path | None:
+        """Update this match's single history file when moves exist."""
         if not self.history:
             return None
         path = directory / f"{self.started_at[:10]}_{self.match_id}.json"
@@ -192,6 +201,7 @@ class GameSession:
 
     @classmethod
     def load(cls, path: Path, game: Game | None = None) -> GameSession:
+        """Load a save by replaying every move through current rules."""
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("version") != SAVE_VERSION:
             raise ValueError("This save was created by an unsupported version of Laser War.")

@@ -12,6 +12,7 @@ def user_data_directory(
     environment: Mapping[str, str] | None = None,
     home: Path | None = None,
 ) -> Path:
+    """Return the platform-appropriate per-user data directory."""
     platform = platform or sys.platform
     environment = environment or os.environ
     home = home or Path.home()

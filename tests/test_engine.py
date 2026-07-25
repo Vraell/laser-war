@@ -25,6 +25,19 @@ class EngineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 game.apply_move(state, Move(4, col, Cell.MIRROR_SLASH))
 
+    def test_occupied_kings_and_shields_have_specific_rejection_reasons(self):
+        game = Game()
+        state = game.initial_state()
+
+        self.assertEqual(
+            game.illegal_move_reason(state, Move(0, 4, Cell.MIRROR_SLASH)),
+            "occupied_king",
+        )
+        self.assertEqual(
+            game.illegal_move_reason(state, Move(0, 3, Cell.MIRROR_SLASH)),
+            "occupied_shield",
+        )
+
     def test_opening_move_count(self):
         game = Game()
         state = game.initial_state()

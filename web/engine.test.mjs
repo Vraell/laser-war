@@ -12,6 +12,8 @@ assert.equal(game.legalMoves(initial).length, 130);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 0, mirror: Cell.SLASH }), false);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 8, mirror: Cell.BACKSLASH }), false);
 assert.equal(game.illegalMoveReason(initial, { row: 4, col: 0, mirror: Cell.SLASH }), "laserEntry");
+assert.equal(game.illegalMoveReason(initial, { row: 0, col: 4, mirror: Cell.SLASH }), "occupiedKing");
+assert.equal(game.illegalMoveReason(initial, { row: 0, col: 3, mirror: Cell.SLASH }), "occupiedShield");
 
 const next = game.resolveMove(initial, { row: 4, col: 4, mirror: Cell.SLASH }).state;
 assert.equal(next.board[4][4], Cell.SLASH);

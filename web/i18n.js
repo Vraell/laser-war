@@ -80,6 +80,8 @@ const TRANSLATIONS = {
     laserEntry: "Laser-entry squares must remain empty.",
     kingAdjacent: "Mirrors cannot be placed next to a king.",
     occupied: "That square is already occupied.",
+    occupiedKing: "A mirror cannot be placed on a king.",
+    occupiedShield: "A mirror cannot be placed on a shield.",
     ownKingUnreachable: "That move would block every possible laser path to your king.",
     opponentKingUnreachable: "That move would create a fortress around the opposing king.",
     leftLaserStranded: "That move would leave the left laser with no path to either king.",
@@ -190,6 +192,8 @@ const TRANSLATIONS = {
     laserEntry: "Les cases d'entrée des lasers doivent rester vides.",
     kingAdjacent: "Un miroir ne peut pas être placé à côté d'un roi.",
     occupied: "Cette case est déjà occupée.",
+    occupiedKing: "Un miroir ne peut pas être placé sur un roi.",
+    occupiedShield: "Un miroir ne peut pas être placé sur un bouclier.",
     ownKingUnreachable: "Ce coup bloquerait toutes les trajectoires possibles vers votre roi.",
     opponentKingUnreachable: "Ce coup formerait une forteresse autour du roi adverse.",
     leftLaserStranded: "Ce coup priverait le laser gauche de toute trajectoire vers un roi.",
@@ -223,6 +227,7 @@ const TRANSLATIONS = {
   },
 };
 
+/** Load the persisted language with an English fallback. */
 export function loadLanguage(storage) {
   try {
     return storage.getItem(LANGUAGE_KEY) === "fr" ? "fr" : "en";
@@ -235,6 +240,7 @@ export function saveLanguage(storage, language) {
   storage.setItem(LANGUAGE_KEY, language === "fr" ? "fr" : "en");
 }
 
+/** Resolve and interpolate a translation with English fallback. */
 export function translate(language, key, values = {}) {
   const template = TRANSLATIONS[language]?.[key] ?? TRANSLATIONS.en[key] ?? key;
   return template.replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ""));

@@ -29,6 +29,7 @@ function cloneBoard(board) {
   return board.map((row) => [...row]);
 }
 
+/** Deep-clone the mutable board portion of a browser game state. */
 function cloneState(state) {
   return {
     board: cloneBoard(state.board),
@@ -45,6 +46,7 @@ function illegalMove(code, message) {
 }
 
 export class Game {
+  /** Initialize fixed laser geometry and the reachability cache. */
   constructor() {
     this.sources = [
       [MIDDLE_ROW, -1, "E"],
@@ -54,6 +56,7 @@ export class Game {
     this.reachabilityCache = new Map();
   }
 
+  /** Create the symmetric opening position for a new match. */
   initialState(turn = "bottom") {
     const board = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(Cell.EMPTY));
     board[0][4] = Cell.TOP_KING;
@@ -71,6 +74,7 @@ export class Game {
     return this.legalChildren(state).map(({ move }) => move);
   }
 
+  /** Return legal moves paired with their fully resolved child states. */
   legalChildren(state) {
     const children = [];
     for (const move of this.pseudoMoves(state)) {
@@ -84,6 +88,7 @@ export class Game {
     return children;
   }
 
+  /** Check a move against placement, firing, and path-preservation rules. */
   isLegalMove(state, move) {
     try {
       this.resolveMove(state, move, false);
@@ -93,6 +98,7 @@ export class Game {
     }
   }
 
+  /** Return a stable rejection code or null when a move is legal. */
   illegalMoveReason(state, move) {
     try {
       this.resolveMove(state, move, false);
@@ -102,12 +108,23 @@ export class Game {
     }
   }
 
+  /** Place a mirror, fire both lasers, apply damage, and validate paths. */
   resolveMove(state, move, checkNoLegalMoves = true) {
     if (state.winner || state.draw) throw illegalMove("gameOver", "The game is already over.");
     if (![Cell.SLASH, Cell.BACKSLASH].includes(move.mirror)) {
       throw illegalMove("invalidMirror", "A move must place a mirror.");
     }
     if (!this.inBounds(move.row, move.col)) throw illegalMove("outsideBoard", "Move is outside the board.");
+    const occupied = state.board[move.row][move.col];
+    if (occupied !== Cell.EMPTY) {
+      if ([Cell.TOP_KING, Cell.BOTTOM_KING].includes(occupied)) {
+        throw illegalMove("occupiedKing", "No mirror can be placed on a king.");
+      }
+      if (occupied === Cell.SHIELD) {
+        throw illegalMove("occupiedShield", "No mirror can be placed on a shield.");
+      }
+      throw illegalMove("occupied", "Move square is not empty.");
+    }
     const forbidden = this.mirrorForbiddenSquares(state.board);
     if (forbidden.has(key(move.row, move.col))) {
       if (this.laserEntrySquares.has(key(move.row, move.col))) {
@@ -115,10 +132,6 @@ export class Game {
       }
       throw illegalMove("kingAdjacent", "No mirror can be placed adjacent to a king.");
     }
-    if (state.board[move.row][move.col] !== Cell.EMPTY) {
-      throw illegalMove("occupied", "Move square is not empty.");
-    }
-
     const placed = cloneBoard(state.board);
     placed[move.row][move.col] = move.mirror;
     const beams = this.fireLasers(placed);
@@ -162,6 +175,7 @@ export class Game {
     return { state: nextState, beams, destroyed, hitKings };
   }
 
+  /** Return whether at least one fully valid move remains. */
   hasAnyLegalMove(state) {
     for (const move of this.pseudoMoves(state)) {
       if (this.isLegalMove(state, move)) return true;
@@ -169,6 +183,7 @@ export class Game {
     return false;
   }
 
+  /** Generate empty placements before expensive path validation. */
   *pseudoMoves(state) {
     if (state.winner || state.draw) return;
     const forbidden = this.mirrorForbiddenSquares(state.board);
@@ -186,6 +201,7 @@ export class Game {
     return new Set([...this.laserEntrySquares, ...this.kingAdjacentSquares(board)]);
   }
 
+  /** Derive all cells where a mirror would touch either king. */
   kingAdjacentSquares(board) {
     const squares = new Set();
     for (let row = 0; row < BOARD_SIZE; row += 1) {
@@ -205,6 +221,7 @@ export class Game {
     return this.sources.map((source) => this.traceBeam(board, source));
   }
 
+  /** Trace one fired laser until it exits, loops, or strikes a piece. */
   traceBeam(board, source) {
     let [row, col, direction] = source;
     const visited = new Set();
@@ -247,6 +264,7 @@ export class Game {
     }
   }
 
+  /** Return the kings each laser could reach after future placements. */
   reachableKingsByLaser(board) {
     const boardKey = board.map((row) => row.join("")).join("");
     if (this.reachabilityCache.has(boardKey)) return this.reachabilityCache.get(boardKey);
@@ -258,6 +276,7 @@ export class Game {
     return reachable;
   }
 
+  /** Explore all legal future beam turns from one laser source. */
   reachableKings(board, source) {
     const forbiddenTurns = this.mirrorForbiddenSquares(board);
     const reachable = new Set();
@@ -288,6 +307,7 @@ export class Game {
     return reachable;
   }
 
+  /** Score a position from the side-to-move perspective. */
   evaluate(state) {
     if (state.draw) return 0;
     if (state.winner === state.turn) return 10000;
@@ -302,6 +322,7 @@ export class Game {
     return score;
   }
 
+  /** Count shields in the evaluation radius around a king. */
   nearbyShields(board, king) {
     let position = null;
     for (let row = 0; row < BOARD_SIZE && !position; row += 1) {

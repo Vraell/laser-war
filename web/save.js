@@ -1,10 +1,12 @@
 export const SAVE_VERSION = 2;
 
+/** Create a stable identifier for a new browser match. */
 export function createMatchId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `match-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/** Derive a deterministic identifier for a legacy save without one. */
 export function legacyMatchId(data) {
   const source = JSON.stringify({
     mode: data.mode,
@@ -19,6 +21,7 @@ export function legacyMatchId(data) {
   return `legacy-${(hash >>> 0).toString(16)}`;
 }
 
+/** Serialize the resumable subset of the current browser session. */
 export function buildActiveSave(session) {
   return {
     version: SAVE_VERSION,

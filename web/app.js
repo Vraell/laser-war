@@ -7,8 +7,10 @@ import {
 } from "./save.js";
 import { loadProgress, recordResult, saveProgress } from "./progress.js";
 import { loadLanguage, saveLanguage, translate } from "./i18n.js";
+import { beamPoints } from "./beam.js";
 
 const SAVE_KEY = "laser-war.web.v1";
+const BEAM_VISIBLE_MS = 920;
 const game = new Game();
 
 const elements = {
@@ -64,6 +66,7 @@ function moveCount(count) {
   return `${count} ${t(count === 1 ? "move" : "moves")}`;
 }
 
+/** Create an empty browser match session with stable identity metadata. */
 function createSession(
   mode = "computer",
   difficulty = "medium",
@@ -96,11 +99,13 @@ function computerTurn() {
     && !session.state.draw;
 }
 
+/** Read the selected difficulty while enforcing the Ultra lock. */
 function currentDifficulty() {
   const selected = document.querySelector('input[name="difficulty"]:checked')?.value || "medium";
   return selected === "ultra" && !progress.ultraUnlocked ? "hard" : selected;
 }
 
+/** Replace the active session with a fresh match and optionally persist it. */
 function startGame(mode, difficulty = currentDifficulty(), persist = true) {
   cancelComputerTurn();
   session = createSession(mode, difficulty);
@@ -110,6 +115,7 @@ function startGame(mode, difficulty = currentDifficulty(), persist = true) {
   if (persist) saveGame();
 }
 
+/** Resolve, record, animate, and save one player or computer move. */
 function playMove(move, actor) {
   if (inputLocked || paused || session.state.winner || session.state.draw) return;
   let outcome;
@@ -151,9 +157,10 @@ function playMove(move, actor) {
       clearBeams();
       if (computerTurn()) beginComputerTurn();
     }
-  }, 720);
+  }, BEAM_VISIBLE_MS);
 }
 
+/** Lock input and submit the current position to the AI worker. */
 function beginComputerTurn() {
   if (elements.gameScreen.hidden || !computerTurn() || inputLocked) return;
   cancelComputerTurn();
@@ -194,6 +201,7 @@ function beginComputerTurn() {
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
 }
 
+/** Apply a still-current AI result or restart search when it became stale. */
 function finishComputerTurn(result) {
   cancelComputerTurn(false);
   inputLocked = false;
@@ -214,6 +222,7 @@ function finishComputerTurn(result) {
   playMove(result.move, "computer");
 }
 
+/** Cancel timers and invalidate pending worker responses. */
 function cancelComputerTurn(invalidate = true) {
   if (invalidate) aiRequestId += 1;
   window.clearInterval(aiTimer);
@@ -233,6 +242,7 @@ function refreshLegalMoves() {
     : [];
 }
 
+/** Refresh every dynamic section of the active match interface. */
 function render() {
   renderMirrorSelection();
   renderBoard();
@@ -240,11 +250,13 @@ function render() {
   renderLog();
 }
 
+/** Synchronize mirror controls with the active orientation. */
 function renderMirrorSelection() {
   elements.slash.classList.toggle("selected", selectedMirror === Cell.SLASH);
   elements.backslash.classList.toggle("selected", selectedMirror === Cell.BACKSLASH);
 }
 
+/** Render all board cells with legal, explanatory, and terminal input states. */
 function renderBoard() {
   const legal = new Set(legalMoves.map(moveKey));
   const forbidden = game.mirrorForbiddenSquares(session.state.board);
@@ -256,8 +268,12 @@ function renderBoard() {
       const value = session.state.board[row][col];
       const move = { row, col, mirror: selectedMirror };
       const moveIsLegal = legal.has(moveKey(move));
-      const canAct = humanTurn() && !inputLocked && !paused;
-      const explainable = canAct && value === Cell.EMPTY && !moveIsLegal;
+      const canAct = humanTurn()
+        && !inputLocked
+        && !paused
+        && !session.state.winner
+        && !session.state.draw;
+      const explainable = canAct && !moveIsLegal;
       cell.className = "cell";
       cell.dataset.row = String(row);
       cell.dataset.col = String(col);
@@ -266,7 +282,7 @@ function renderBoard() {
       if (forbidden.has(`${row},${col}`)) cell.classList.add("blocked");
       if (moveIsLegal && canAct) cell.classList.add("legal");
       if (explainable) cell.classList.add("explainable");
-      cell.disabled = !canAct || value !== Cell.EMPTY;
+      cell.disabled = !canAct;
       cell.addEventListener("click", () => {
         if (moveIsLegal) {
           playMove(move, session.mode === "computer" ? "you" : session.state.turn);
@@ -287,6 +303,7 @@ function renderBoard() {
   }
 }
 
+/** Build the visual token for one nonempty engine cell. */
 function pieceFor(value) {
   const piece = document.createElement("span");
   piece.className = "piece";
@@ -303,6 +320,7 @@ function pieceFor(value) {
   return piece;
 }
 
+/** Build a localized accessible label for one board cell. */
 function cellLabel(row, col, value, moveIsLegal, explainable = false) {
   const names = {
     [Cell.EMPTY]: t("empty"),
@@ -319,11 +337,13 @@ function cellLabel(row, col, value, moveIsLegal, explainable = false) {
   return t("cellLabel", { row: row + 1, col: col + 1, cell: names[value], action });
 }
 
+/** Explain why a clicked illegal placement was rejected. */
 function explainIllegalMove(move) {
   const reason = game.illegalMoveReason(session.state, move) || "illegalMove";
   showToast(t(reason));
 }
 
+/** Render the current turn, search, or terminal status. */
 function renderStatus() {
   let text = "";
   let color = "var(--amber)";
@@ -348,6 +368,7 @@ function renderStatus() {
   elements.statusLight.style.color = color;
 }
 
+/** Rebuild the localized and scrollable current-match history. */
 function renderLog() {
   elements.moveCount.textContent = moveCount(session.history.length);
   elements.copyLog.disabled = session.history.length === 0;
@@ -367,6 +388,7 @@ function renderLog() {
   elements.log.scrollTop = elements.log.scrollHeight;
 }
 
+/** Format one turn record for the active interface language. */
 function recordSummary(record) {
   const effects = [];
   if (record.outcome.destroyed.length) {
@@ -394,6 +416,7 @@ function positionLabel(row, col) {
   return t("rowColumn", { row: row + 1, col: col + 1 });
 }
 
+/** Normalize canonical and legacy actors for localized display. */
 function actorLabel(actor) {
   const normalized = String(actor).toLowerCase();
   if (["you", "vous"].includes(normalized)) return t("you");
@@ -403,16 +426,17 @@ function actorLabel(actor) {
   return actor;
 }
 
+/** Draw both animated SVG beam paths from one resolved volley. */
 function renderBeams(beams) {
   clearBeams();
   beams.forEach((beam, index) => {
-    const points = [[index === 0 ? 0 : 900, 450]];
-    points.push(...beam.path.map(([row, col]) => [col * 100 + 50, row * 100 + 50]));
+    const points = beamPoints(beam, index);
     const pointString = points.map((point) => point.join(",")).join(" ");
     const color = index === 0 ? "var(--red)" : "var(--cyan)";
     for (const className of ["beam-glow", "beam-core"]) {
       const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
       line.setAttribute("points", pointString);
+      line.setAttribute("pathLength", "1");
       line.setAttribute("class", className);
       if (className === "beam-core") line.style.stroke = color;
       elements.beams.append(line);
@@ -424,6 +448,7 @@ function clearBeams() {
   elements.beams.replaceChildren();
 }
 
+/** Reveal and populate the terminal result panel without covering the board. */
 function showResult(playSound = true) {
   if (
     !ultraUnlockedThisMatch
@@ -461,6 +486,7 @@ function showResult(playSound = true) {
   if (playSound) audio.play("victory");
 }
 
+/** Undo exactly one move and refresh all derived state. */
 function undo() {
   if (inputLocked || !session.history.length) return;
   cancelComputerTurn();
@@ -477,6 +503,7 @@ function undo() {
   audio.play("undo");
 }
 
+/** Revalidate and restore exactly one previously undone move. */
 function redo() {
   if (inputLocked || !session.redo.length) return;
   cancelComputerTurn();
@@ -507,7 +534,7 @@ function redo() {
   if (session.state.winner || session.state.draw) {
     showResult();
   } else {
-    window.setTimeout(clearBeams, 720);
+    window.setTimeout(clearBeams, BEAM_VISIBLE_MS);
   }
 }
 
@@ -515,6 +542,7 @@ function restart() {
   startGame(session.mode, session.difficulty);
 }
 
+/** Leave the active match and restore the main menu. */
 function returnToMenu() {
   cancelComputerTurn();
   inputLocked = false;
@@ -527,6 +555,7 @@ function returnToMenu() {
   elements.continueButton.disabled = !hasSave();
 }
 
+/** Toggle the modal pause state for an unfinished match. */
 function togglePause() {
   if (elements.gameScreen.hidden || inputLocked || session.state.winner || session.state.draw) return;
   paused = !paused;
@@ -534,6 +563,7 @@ function togglePause() {
   renderBoard();
 }
 
+/** Persist the active browser match and report unavailable storage. */
 function saveGame() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(session)));
@@ -543,6 +573,7 @@ function saveGame() {
   }
 }
 
+/** Return whether browser storage contains a supported active save. */
 function hasSave() {
   try {
     return [1, SAVE_VERSION].includes(JSON.parse(localStorage.getItem(SAVE_KEY))?.version);
@@ -551,6 +582,7 @@ function hasSave() {
   }
 }
 
+/** Rebuild a saved session by replaying moves through current rules. */
 function sessionFromSave(data) {
   if (![1, SAVE_VERSION].includes(data?.version)) throw new Error("Unsupported save.");
   const restored = createSession(
@@ -576,6 +608,7 @@ function sessionFromSave(data) {
   return restored;
 }
 
+/** Load the active save and restore terminal visuals or computer play. */
 function continueGame() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
@@ -603,6 +636,7 @@ function continueGame() {
   }
 }
 
+/** Initialize all controls and derived rendering for the active match. */
 function startGameView() {
   selectedMirror = Cell.SLASH;
   inputLocked = false;
@@ -622,6 +656,7 @@ function startGameView() {
   render();
 }
 
+/** Synchronize the Ultra selector and explanatory progression text. */
 function updateProgressUI() {
   elements.ultraDifficulty.disabled = !progress.ultraUnlocked;
   elements.ultraState.textContent = progress.ultraUnlocked ? t("ready") : t("locked");
@@ -629,6 +664,7 @@ function updateProgressUI() {
   elements.progressNote.classList.toggle("unlocked", progress.ultraUnlocked);
 }
 
+/** Validate and upgrade an older active-save representation in place. */
 function migrateStoredSave() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
@@ -640,6 +676,7 @@ function migrateStoredSave() {
   }
 }
 
+/** Build the localized plain-text match log used by the copy action. */
 function currentLogText() {
   const count = session.history.length;
   return [
@@ -650,6 +687,7 @@ function currentLogText() {
   ].join("\n");
 }
 
+/** Copy the current localized match log or explain why copying failed. */
 async function copyMatchLog() {
   if (!session.history.length) {
     showToast(t("noMovesToCopy"));
@@ -663,6 +701,7 @@ async function copyMatchLog() {
   }
 }
 
+/** Display a transient message for the standard toast duration. */
 function showToast(message) {
   window.clearTimeout(toastTimer);
   elements.toast.textContent = message;
@@ -670,6 +709,7 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 2600);
 }
 
+/** Apply a mirror orientation and immediately refresh its visual state. */
 function selectMirror(mirror) {
   if (inputLocked) return;
   selectedMirror = mirror;
@@ -677,6 +717,7 @@ function selectMirror(mirror) {
   renderBoard();
 }
 
+/** Apply, persist, and rerender the selected interface language. */
 function applyLanguage(nextLanguage, persist = true) {
   language = nextLanguage === "fr" ? "fr" : "en";
   if (persist) saveLanguage(localStorage, language);
@@ -707,23 +748,27 @@ function applyLanguage(nextLanguage, persist = true) {
 }
 
 class Audio {
+  /** Initialize lazy browser-audio state without requesting playback yet. */
   constructor() {
     this.enabled = true;
     this.context = null;
   }
 
+  /** Toggle effects and synchronize the sound control label. */
   toggle() {
     this.enabled = !this.enabled;
     elements.sound.textContent = this.enabled ? "♪" : "×";
     this.updateLabel();
   }
 
+  /** Update localized accessible text for the sound control. */
   updateLabel() {
     const label = this.enabled ? t("muteSound") : t("enableSound");
     elements.sound.setAttribute("aria-label", label);
     elements.sound.setAttribute("title", label);
   }
 
+  /** Synthesize and play a named lightweight interface effect. */
   play(name) {
     if (!this.enabled) return;
     try {

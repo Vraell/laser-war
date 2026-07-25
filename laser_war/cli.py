@@ -2,6 +2,7 @@ from .engine import Game
 
 
 def main() -> None:
+    """Print the opening board and a baseline engine move."""
     game = Game()
     state = game.initial_state()
     print(game.render(state, show_coords=True))

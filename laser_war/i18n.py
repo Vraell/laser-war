@@ -74,6 +74,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "illegal_laser_entry": "Laser-entry squares must remain empty.",
         "illegal_king_adjacent": "Mirrors cannot be placed next to a king.",
         "illegal_occupied": "That square is already occupied.",
+        "illegal_occupied_king": "A mirror cannot be placed on a king.",
+        "illegal_occupied_shield": "A mirror cannot be placed on a shield.",
         "illegal_own_king_unreachable": "That move would block every possible laser path to your king.",
         "illegal_opponent_king_unreachable": "That move would create a fortress around the opposing king.",
         "illegal_left_laser_stranded": "That move would leave the left laser with no path to either king.",
@@ -165,6 +167,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "illegal_laser_entry": "Les cases d'entrée des lasers doivent rester vides.",
         "illegal_king_adjacent": "Un miroir ne peut pas être placé à côté d'un roi.",
         "illegal_occupied": "Cette case est déjà occupée.",
+        "illegal_occupied_king": "Un miroir ne peut pas être placé sur un roi.",
+        "illegal_occupied_shield": "Un miroir ne peut pas être placé sur un bouclier.",
         "illegal_own_king_unreachable": "Ce coup bloquerait toutes les trajectoires possibles vers votre roi.",
         "illegal_opponent_king_unreachable": "Ce coup formerait une forteresse autour du roi adverse.",
         "illegal_left_laser_stranded": "Ce coup priverait le laser gauche de toute trajectoire vers un roi.",
@@ -189,5 +193,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
 
 def translate(language: str, key: str, **values: Any) -> str:
+    """Resolve and format a translation with English fallback."""
     template = TRANSLATIONS.get(language, TRANSLATIONS["en"]).get(key, TRANSLATIONS["en"].get(key, key))
     return template.format(**values)

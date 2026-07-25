@@ -488,8 +488,8 @@ button.quiet {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 2800;
-  stroke-dashoffset: 2800;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
   animation: fire-beam 620ms ease-out forwards;
 }
 

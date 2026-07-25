@@ -4,12 +4,23 @@ from threading import Event
 from unittest.mock import Mock
 
 from laser_war.ai import SearchResult
-from laser_war.engine import Cell, Move
-from laser_war.pygame_app import LaserWarGame, MoveAnimation
+from laser_war.engine import BeamResult, Cell, Move
+from laser_war.pygame_app import BEAM_HOLD_SECONDS, BOARD_RECT, LaserWarGame, MoveAnimation
 from laser_war.session import GameSession
 
 
 class PygameAppTests(unittest.TestCase):
+    def test_completed_beam_holds_before_a_regular_move_finishes(self):
+        self.assertGreaterEqual(BEAM_HOLD_SECONDS, 0.25)
+
+    def test_exiting_beam_reaches_the_board_edge(self):
+        app = LaserWarGame.__new__(LaserWarGame)
+        beam = BeamResult(((4, 7, "E"), (4, 8, "E")), exited=True)
+
+        points = app._beam_points(beam, 0)
+
+        self.assertEqual(points[-1], (BOARD_RECT.right, BOARD_RECT.centery))
+
     def test_final_volley_is_retained_after_winning_animation(self):
         app = LaserWarGame.__new__(LaserWarGame)
         app.scene = "game"

@@ -15,6 +15,7 @@ class Preferences:
 
     @classmethod
     def load(cls, path: Path) -> Preferences:
+        """Load validated interface preferences or return defaults."""
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -24,6 +25,7 @@ class Preferences:
         return cls(language="fr" if data.get("language") == "fr" else "en")
 
     def save(self, path: Path) -> None:
+        """Persist interface preferences atomically."""
         write_json_atomic(
             path,
             {

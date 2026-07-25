@@ -21,6 +21,7 @@ function scoreForTop(game, state) {
   return state.turn === "top" ? game.evaluate(state) : -game.evaluate(state);
 }
 
+/** Choose an Easy, Medium, or Hard move with bounded tactical reply analysis. */
 function standardMove(game, state, difficulty, random) {
   const started = performance.now();
   const children = game.legalChildren(state);
@@ -118,6 +119,7 @@ function standardMove(game, state, difficulty, random) {
 }
 
 class UltraSearch {
+  /** Initialize caches and timing for one Ultra search. */
   constructor(game, now) {
     this.game = game;
     this.now = now;
@@ -129,6 +131,7 @@ class UltraSearch {
     this.childrenCache = new Map();
   }
 
+  /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
     const started = this.now();
     this.deadline = started + ULTRA_PROFILE.timeLimit;
@@ -165,6 +168,7 @@ class UltraSearch {
     };
   }
 
+  /** Score and rank the root children at one completed depth. */
   searchRoot(state, depth) {
     let alpha = -Infinity;
     const beta = Infinity;
@@ -181,6 +185,7 @@ class UltraSearch {
     return ranked[0];
   }
 
+  /** Evaluate a subtree with selective alpha-beta negamax. */
   negamax(state, depth, alpha, beta, ply) {
     this.checkInterrupted();
     this.nodes += 1;
@@ -218,6 +223,7 @@ class UltraSearch {
     return value;
   }
 
+  /** Return legal children sorted by tactical search priority. */
   orderedChildren(state) {
     const key = stateKey(state);
     let children = this.childrenCache.get(key);
@@ -232,6 +238,7 @@ class UltraSearch {
     ));
   }
 
+  /** Rank a move for ordering without changing its position value. */
   movePriority(state, move, child, preferred) {
     if (child.winner === state.turn) return 1_000_000;
     if (child.winner) return -1_000_000;
@@ -249,11 +256,13 @@ class UltraSearch {
       + adjacentMirrors * 20;
   }
 
+  /** Abort once the configured search deadline is reached. */
   checkInterrupted() {
     if (this.now() >= this.deadline) throw new SearchInterrupted();
   }
 }
 
+/** Dispatch a computer move search to the requested difficulty profile. */
 export function chooseComputerMove(game, state, difficulty = "medium", options = {}) {
   const random = options.random || Math.random;
   const now = options.now || (() => performance.now());
