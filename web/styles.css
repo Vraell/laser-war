@@ -36,6 +36,10 @@ body {
   color: var(--ink);
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 button,
 input {
   font: inherit;
@@ -117,12 +121,7 @@ button.primary {
 
 .menu-utilities {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.menu-utilities .auto-log {
-  grid-column: 1 / -1;
 }
 
 .menu-actions button {
@@ -477,6 +476,7 @@ button.quiet {
   flex-direction: column;
   border-left: 1px solid #283139;
   background: var(--panel);
+  overflow-anchor: none;
 }
 
 .status-block {
@@ -557,12 +557,13 @@ button.quiet {
   font-size: 11px;
 }
 
-.log-export {
-  width: 28px;
+.log-copy {
+  min-width: 54px;
   min-height: 28px;
-  padding: 0;
+  padding: 0 9px;
   border-radius: 4px;
-  font-size: 17px;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -574,6 +575,7 @@ button.quiet {
   padding: 0 0 0 22px;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
@@ -760,8 +762,16 @@ dialog h2 {
   }
 
   #match-log {
-    max-height: 280px;
+    height: 280px;
+    max-height: none;
     flex: none;
+  }
+}
+
+@media (min-width: 981px) {
+  .game-layout {
+    height: calc(100dvh - 58px);
+    min-height: 620px;
   }
 }
 
@@ -840,6 +850,10 @@ dialog h2 {
   .log-band {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  #match-log {
+    height: 220px;
   }
 
   .rules-grid {

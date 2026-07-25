@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 
-import { buildMatchRecord, loadMatchArchive, upsertMatchRecord } from "./archive.js";
 import { Cell, Game, chooseComputerMove } from "./engine.js";
 
 const game = new Game();
@@ -64,48 +63,6 @@ for (const [row, col, mirror] of strandingSetup) {
   strandingState = game.resolveMove(strandingState, { row, col, mirror }).state;
 }
 assert.equal(game.isLegalMove(strandingState, { row: 0, col: 7, mirror: "\\" }), false);
-
-class MemoryStorage {
-  constructor() {
-    this.values = new Map();
-  }
-
-  getItem(key) {
-    return this.values.get(key) ?? null;
-  }
-
-  setItem(key, value) {
-    this.values.set(key, value);
-  }
-}
-
-const storage = new MemoryStorage();
-const archivedSession = {
-  id: "match-1",
-  startedAt: "2026-07-25T00:00:00.000Z",
-  mode: "computer",
-  difficulty: "hard",
-  state: next,
-  events: [],
-  history: [{
-    number: 1,
-    actor: "You",
-    move: { row: 4, col: 4, mirror: Cell.SLASH },
-    outcome: { destroyed: [], hitKings: new Set() },
-  }],
-};
-upsertMatchRecord(storage, buildMatchRecord(archivedSession, "active", "2026-07-25T00:01:00.000Z"));
-archivedSession.history.push({
-  number: 2,
-  actor: "Computer",
-  move: { row: 3, col: 4, mirror: Cell.BACKSLASH },
-  outcome: { destroyed: [], hitKings: new Set() },
-});
-upsertMatchRecord(storage, buildMatchRecord(archivedSession, "abandoned", "2026-07-25T00:02:00.000Z"));
-const archive = loadMatchArchive(storage);
-assert.equal(archive.matches.length, 1);
-assert.equal(archive.matches[0].moveCount, 2);
-assert.equal(archive.matches[0].status, "abandoned");
 
 const tacticalGame = {
   legalMoves(state) {

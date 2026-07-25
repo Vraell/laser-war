@@ -2,18 +2,9 @@ import { BOARD_SIZE, Cell, Game, chooseComputerMove, cloneState } from "./engine
 import {
   SAVE_VERSION,
   buildActiveSave,
-  buildMatchRecord,
   createMatchId,
   legacyMatchId,
-  loadMatchArchive,
-  upsertMatchRecord,
 } from "./archive.js";
-import {
-  enableFileMirror,
-  fileMirrorEnabled,
-  fileMirrorSupported,
-  queueFileMirror,
-} from "./file_mirror.js";
 
 const SAVE_KEY = "laser-war.web.v1";
 const game = new Game();
@@ -30,9 +21,7 @@ const elements = {
   moveCount: document.querySelector("#move-count"),
   aiDetail: document.querySelector("#ai-detail"),
   continueButton: document.querySelector("#continue-game"),
-  exportLogs: document.querySelector("#export-logs"),
-  exportLogsGame: document.querySelector("#export-logs-game"),
-  enableAutoLog: document.querySelector("#enable-auto-log"),
+  copyLog: document.querySelector("#copy-log"),
   slash: document.querySelector("#select-slash"),
   backslash: document.querySelector("#select-backslash"),
   pauseOverlay: document.querySelector("#pause-overlay"),
@@ -267,6 +256,7 @@ function renderStatus() {
 
 function renderLog() {
   elements.moveCount.textContent = `${session.history.length} ${session.history.length === 1 ? "move" : "moves"}`;
+  elements.copyLog.disabled = session.history.length === 0;
   elements.log.replaceChildren();
   if (!session.history.length) {
     const empty = document.createElement("li");
@@ -393,12 +383,10 @@ function redo() {
 }
 
 function restart() {
-  archiveCurrentSession("abandoned");
   startGame(session.mode, session.difficulty);
 }
 
 function returnToMenu() {
-  archiveCurrentSession("abandoned");
   inputLocked = false;
   paused = false;
   elements.pauseOverlay.hidden = true;
@@ -415,23 +403,13 @@ function togglePause() {
   renderBoard();
 }
 
-function saveGame(status = "active") {
+function saveGame() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(session)));
-    if (session.history.length) {
-      upsertMatchRecord(localStorage, buildMatchRecord(session, status));
-    }
-    queueFileMirror(loadMatchArchive(localStorage));
     elements.continueButton.disabled = false;
-    updateExportButton();
   } catch {
     showToast("Match storage is full or unavailable.");
   }
-}
-
-function archiveCurrentSession(status) {
-  if (!session.history.length) return;
-  saveGame(status);
 }
 
 function hasSave() {
@@ -507,63 +485,37 @@ function startGameView() {
   render();
 }
 
-function migrateStoredSaveToArchive() {
+function migrateStoredSave() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
     if (![1, SAVE_VERSION].includes(data?.version)) return;
     const restored = sessionFromSave(data);
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(restored)));
-    if (restored.history.length) {
-      upsertMatchRecord(localStorage, buildMatchRecord(restored));
-    }
   } catch {
     // Continue still reports malformed active saves when the user attempts to load one.
   }
 }
 
-function updateExportButton() {
-  const disabled = loadMatchArchive(localStorage).matches.length === 0;
-  elements.exportLogs.disabled = disabled;
-  elements.exportLogsGame.disabled = disabled;
+function currentLogText() {
+  const count = session.history.length;
+  return [
+    "MATCH LOG",
+    "",
+    `${count} ${count === 1 ? "move" : "moves"}`,
+    ...session.history.map(recordSummary),
+  ].join("\n");
 }
 
-function exportMatchLogs() {
-  const archive = loadMatchArchive(localStorage);
-  if (!archive.matches.length) {
-    showToast("No recorded matches yet.");
+async function copyMatchLog() {
+  if (!session.history.length) {
+    showToast("No moves to copy yet.");
     return;
   }
-  const payload = {
-    ...archive,
-    exportedAt: new Date().toISOString(),
-  };
-  const url = URL.createObjectURL(new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `laser-war-match-logs-${new Date().toISOString().slice(0, 10)}.json`;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-async function updateAutoLogButton() {
-  if (!fileMirrorSupported()) {
-    elements.enableAutoLog.disabled = true;
-    elements.enableAutoLog.textContent = "Auto Log Unavailable";
-    elements.enableAutoLog.title = "Use a Chromium desktop browser to mirror logs automatically.";
-    return;
-  }
-  const enabled = await fileMirrorEnabled();
-  elements.enableAutoLog.disabled = false;
-  elements.enableAutoLog.textContent = enabled ? "Auto Log File Enabled" : "Enable Auto Log File";
-}
-
-async function enableAutoLogFile() {
   try {
-    const enabled = await enableFileMirror(loadMatchArchive(localStorage));
-    await updateAutoLogButton();
-    showToast(enabled ? "Automatic log file enabled." : "Automatic log file was not enabled.");
-  } catch (error) {
-    if (error.name !== "AbortError") showToast("Could not enable the automatic log file.");
+    await navigator.clipboard.writeText(currentLogText());
+    showToast("Match log copied.");
+  } catch {
+    showToast("Could not copy the match log.");
   }
 }
 
@@ -646,9 +598,7 @@ document.querySelector("#main-menu").addEventListener("click", returnToMenu);
 document.querySelector("#play-again").addEventListener("click", restart);
 document.querySelector("#result-menu").addEventListener("click", returnToMenu);
 document.querySelector("#show-rules").addEventListener("click", () => elements.rules.showModal());
-elements.exportLogs.addEventListener("click", exportMatchLogs);
-elements.exportLogsGame.addEventListener("click", exportMatchLogs);
-elements.enableAutoLog.addEventListener("click", enableAutoLogFile);
+elements.copyLog.addEventListener("click", copyMatchLog);
 elements.sound.addEventListener("click", () => audio.toggle());
 
 document.addEventListener("keydown", (event) => {
@@ -661,15 +611,12 @@ document.addEventListener("keydown", (event) => {
   else if (event.key.toLowerCase() === "r") restart();
 });
 
-migrateStoredSaveToArchive();
+migrateStoredSave();
 elements.continueButton.disabled = !hasSave();
-updateExportButton();
-updateAutoLogButton();
 window.__laserWar = {
   game,
   startGame,
   playMove,
   getSession: () => session,
   getLegalMoves: () => legalMoves,
-  getMatchArchive: () => loadMatchArchive(localStorage),
 };

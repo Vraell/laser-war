@@ -5,12 +5,8 @@ A polished desktop reconstruction of the mirror-and-laser strategy game.
 ## Play Online
 
 Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). No installation or Python runtime
-is required. Every move is saved immediately in that browser's persistent match archive. Use **Export Match
-Logs** on the main menu to download the complete JSON history.
-
-On Chromium desktop browsers, **Enable Auto Log File** grants one file permission and keeps
-`laser-war-live-match-logs.json` updated after every subsequent move. Other browsers continue to use the
-browser archive and manual export.
+is required. Every move is saved immediately in that browser so an interrupted match can continue. Use
+**Copy** beside the in-game match log to place the current readable log on the clipboard.
 
 ## Play
 
@@ -31,7 +27,7 @@ The game includes:
 - symmetric anti-fortress rules that keep both kings and both lasers viable;
 - pause, undo, redo, restart, autosave, and continue;
 - a validated, scrollable match history with damage events;
-- persistent per-match logs, including completed and abandoned games.
+- a scrollable current-match log with one-click clipboard copying.
 
 The interface uses the bundled Inter typeface under the SIL Open Font License.
 
