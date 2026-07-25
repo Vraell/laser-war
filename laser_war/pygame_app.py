@@ -407,7 +407,7 @@ class LaserWarGame:
         ]
         self._add_buttons(language_buttons, mouse)
 
-        version = self.fonts["tiny"].render("v0.7", True, color("muted"))
+        version = self.fonts["tiny"].render("v0.8", True, color("muted"))
         self.canvas.blit(version, (448, 757))
 
     def _draw_rules(self, mouse: tuple[int, int]) -> None:

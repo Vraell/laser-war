@@ -6,7 +6,7 @@ A polished desktop reconstruction of the mirror-and-laser strategy game.
 
 Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). No installation or Python runtime
 is required. Every move is saved immediately in that browser so an interrupted match can continue. Use
-**Copy** beside the in-game match log to place the current readable log on the clipboard.
+**Copy** beside the in-game match log to place the titled, dated, participant-labelled log on the clipboard.
 
 ## Play
 
@@ -32,7 +32,7 @@ The game includes:
 - a scrollable current-match log with one-click clipboard copying.
 
 Ultra unlocks after the player defeats the Hard computer. Progress is stored locally on each device.
-Ultra combines iterative-deepening alpha-beta search with tactical king-threat stabilization, mate-distance
+Ultra combines time-bounded iterative-deepening alpha-beta search with tactical king-threat stabilization, mate-distance
 scoring, shield and laser-route evaluation, and principal-variation, history, and killer-move ordering.
 An earned Ultra unlock is preserved when the progress-data format or game version changes.
 

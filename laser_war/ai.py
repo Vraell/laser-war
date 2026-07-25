@@ -25,7 +25,7 @@ DIFFICULTIES = {
     "easy": DifficultyProfile("Easy", 0.20, 1, 5),
     "medium": DifficultyProfile("Medium", 1.25, 3, 1),
     "hard": DifficultyProfile("Hard", 3.50, 5, 1),
-    "ultra": DifficultyProfile("Ultra", 15.0, 4, 1, 24, (22, 12, 8)),
+    "ultra": DifficultyProfile("Ultra", 6.0, 10, 1, 24, (22, 12, 8)),
 }
 
 
@@ -68,6 +68,7 @@ class ComputerAI:
         self.profile = profile
         started = monotonic()
         self.deadline = started + profile.time_limit
+        soft_deadline, late_position = self._soft_deadline(state, started)
         self.cancel_event = cancel_event
         self.nodes = 0
         self.ordering.clear()
@@ -88,6 +89,7 @@ class ComputerAI:
         ranked: list[tuple[float, Move]] = []
 
         for depth in range(1, profile.max_depth + 1):
+            iteration_started = monotonic()
             configured_deadline = self.deadline
             if depth == 1:
                 self.deadline = inf
@@ -102,6 +104,15 @@ class ComputerAI:
             ranked = iteration_ranked
             completed_depth = depth
             self.ordering[state] = move
+            iteration_elapsed = monotonic() - iteration_started
+            now = monotonic()
+            if abs(best_score) >= MATE_SCORE - 100:
+                break
+            if depth >= 3 and (
+                now >= soft_deadline
+                or (not late_position and now + max(0.05, iteration_elapsed * 1.8) >= soft_deadline)
+            ):
+                break
 
         if profile.candidate_spread > 1 and ranked:
             candidates = ranked[: min(profile.candidate_spread, len(ranked))]
@@ -303,6 +314,19 @@ class ComputerAI:
             return None
         index = min(max(0, ply - 1), len(self.profile.branch_limits) - 1)
         return self.profile.branch_limits[index]
+
+    def _soft_deadline(self, state: State, started: float) -> tuple[float, bool]:
+        """Choose a responsive think target while preserving Ultra's hard cap."""
+        if self.profile.label != "Ultra":
+            return self.deadline, False
+        mirrors = sum(
+            cell in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH)
+            for row in state.board
+            for cell in row
+        )
+        late_position = mirrors >= 31
+        soft_limit = 6.0 if late_position else 3.5 if mirrors >= 12 else 2.25
+        return min(self.deadline, started + soft_limit), late_position
 
     def _check_interrupted(self) -> None:
         """Abort promptly when the search deadline or cancellation flag is reached."""

@@ -2,7 +2,7 @@ import { BOARD_SIZE, Cell } from "./engine.js";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
-  maxDepth: 4,
+  maxDepth: 10,
   rootLimit: 24,
   branchLimits: [22, 12, 8],
 };
@@ -121,9 +121,10 @@ function standardMove(game, state, difficulty, random) {
 
 export class UltraSearch {
   /** Initialize caches and timing for one Ultra search. */
-  constructor(game, now) {
+  constructor(game, now, profile = ULTRA_PROFILE) {
     this.game = game;
     this.now = now;
+    this.profile = profile;
     this.deadline = Infinity;
     this.nodes = 0;
     this.ordering = new Map();
@@ -136,7 +137,8 @@ export class UltraSearch {
   /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
     const started = this.now();
-    this.deadline = started + ULTRA_PROFILE.timeLimit;
+    this.deadline = started + this.profile.timeLimit;
+    const timing = this.softTiming(state, started);
     const rootKey = stateKey(state);
     const children = this.game.legalChildren(state);
     if (!children.length) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: 0 };
@@ -145,7 +147,8 @@ export class UltraSearch {
     let bestMove = children[0].move;
     let bestScore = -Infinity;
     let completedDepth = 0;
-    for (let depth = 1; depth <= ULTRA_PROFILE.maxDepth; depth += 1) {
+    for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
+      const iterationStarted = this.now();
       const configuredDeadline = this.deadline;
       if (depth === 1) this.deadline = Infinity;
       try {
@@ -154,6 +157,14 @@ export class UltraSearch {
         bestScore = result.score;
         completedDepth = depth;
         this.ordering.set(rootKey, moveKey(bestMove));
+        const now = this.now();
+        const iterationElapsed = now - iterationStarted;
+        if (Math.abs(bestScore) >= MATE_SCORE - 100) break;
+        if (depth >= 3 && (
+          now >= timing.softDeadline
+          || (!timing.latePosition
+            && now + Math.max(50, iterationElapsed * 1.8) >= timing.softDeadline)
+        )) break;
       } catch (error) {
         if (!(error instanceof SearchInterrupted)) throw error;
         break;
@@ -175,7 +186,7 @@ export class UltraSearch {
     let alpha = -Infinity;
     const beta = Infinity;
     let children = this.orderedChildren(state, 0);
-    if (depth >= 3) children = children.slice(0, ULTRA_PROFILE.rootLimit);
+    if (depth >= 3) children = children.slice(0, this.profile.rootLimit);
     const ranked = [];
     for (const { move, state: child } of children) {
       this.checkInterrupted();
@@ -203,8 +214,8 @@ export class UltraSearch {
 
     let children = this.orderedChildren(state, ply);
     if (!children.length) return 0;
-    const branchLimit = ULTRA_PROFILE.branchLimits[
-      Math.min(Math.max(0, ply - 1), ULTRA_PROFILE.branchLimits.length - 1)
+    const branchLimit = this.profile.branchLimits[
+      Math.min(Math.max(0, ply - 1), this.profile.branchLimits.length - 1)
     ];
     children = children.slice(0, branchLimit);
 
@@ -339,6 +350,17 @@ export class UltraSearch {
   /** Abort once the configured search deadline is reached. */
   checkInterrupted() {
     if (this.now() >= this.deadline) throw new SearchInterrupted();
+  }
+
+  /** Set a phase-aware think target below the absolute search deadline. */
+  softTiming(state, started) {
+    const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
+    const latePosition = mirrors >= 31;
+    const softLimit = latePosition ? 6000 : mirrors >= 12 ? 3500 : 2250;
+    return {
+      latePosition,
+      softDeadline: Math.min(this.deadline, started + softLimit),
+    };
   }
 }
 

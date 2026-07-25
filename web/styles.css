@@ -657,6 +657,13 @@ button.quiet {
   font-size: 11px;
 }
 
+.match-meta {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .log-copy {
   min-width: 54px;
   min-height: 28px;
@@ -671,7 +678,7 @@ button.quiet {
   min-height: 0;
   flex: 1;
   max-height: none;
-  margin: 16px 0 0;
+  margin: 10px 0 0;
   padding: 0 0 0 22px;
   overflow-x: hidden;
   overflow-y: auto;

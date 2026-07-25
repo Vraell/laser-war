@@ -39,5 +39,9 @@ assert.equal(
   "Au tour du joueur du haut",
 );
 assert.equal(translate("en", "resultDetail", { difficulty: "Hard", count: "17 moves" }), "Hard · 17 moves");
+assert.equal(translate("en", "computerMatchup", { difficulty: "Ultra" }), "You vs Ultra AI");
+assert.equal(translate("fr", "computerMatchup", { difficulty: "Ultra" }), "Vous contre l'IA Ultra");
+assert.equal(translate("fr", "matchLogTitle"), "LASER WAR · HISTORIQUE");
+assert.equal(translate("fr", "ultraSearch"), "Ultra · analyse stratégique avancée");
 
 console.log("Web localization checks passed.");

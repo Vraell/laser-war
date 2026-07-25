@@ -4,6 +4,12 @@ import { readFileSync } from "node:fs";
 import { UltraSearch } from "./ai.js";
 import { Game } from "./engine.js";
 
+const TEST_PROFILE = {
+  timeLimit: Infinity,
+  maxDepth: 4,
+  rootLimit: 24,
+  branchLimits: [22, 12, 8],
+};
 const game = new Game();
 let state = game.initialState();
 const setup = [
@@ -34,7 +40,7 @@ for (const [row, col, mirror] of setup) {
   state = game.resolveMove(state, { row, col, mirror }).state;
 }
 
-const search = new UltraSearch(game, () => 0);
+const search = new UltraSearch(game, () => 0, TEST_PROFILE);
 const result = search.choose(state);
 
 assert.ok(result.depth >= 4, `Ultra only completed depth ${result.depth}.`);
@@ -53,10 +59,17 @@ for (const [row, col, mirror] of fixture.moves.slice(0, -1)) {
     mirror,
   }).state;
 }
-const horizonSearch = new UltraSearch(game, () => 0);
+const horizonSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const horizonScore = horizonSearch.stabilizedEvaluation(forcedState, 4);
 assert.equal(horizonScore, -9995);
 assert.ok(horizonSearch.nodes > 0);
+
+const productionSearch = new UltraSearch(game, () => 0);
+assert.ok(productionSearch.profile.maxDepth >= 8);
+assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
+  latePosition: false,
+  softDeadline: 2250,
+});
 
 console.log(
   `Ultra horizon check passed at depth ${result.depth} `

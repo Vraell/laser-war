@@ -39,7 +39,7 @@ class AITests(unittest.TestCase):
         self.assertLess(DIFFICULTIES["medium"].time_limit, DIFFICULTIES["hard"].time_limit)
         self.assertLess(DIFFICULTIES["hard"].time_limit, DIFFICULTIES["ultra"].time_limit)
         self.assertLess(DIFFICULTIES["easy"].max_depth, DIFFICULTIES["hard"].max_depth)
-        self.assertGreaterEqual(DIFFICULTIES["ultra"].max_depth, 4)
+        self.assertGreaterEqual(DIFFICULTIES["ultra"].max_depth, 8)
 
     def test_easy_ai_answers_the_center_gambit(self):
         game = Game()
@@ -88,7 +88,7 @@ class AITests(unittest.TestCase):
             state = game.resolve_move(state, Move(row, col, Cell(mirror))).state
 
         profile = DIFFICULTIES["ultra"]
-        DIFFICULTIES["ultra"] = replace(profile, time_limit=30.0)
+        DIFFICULTIES["ultra"] = replace(profile, label="Ultra Test", time_limit=30.0, max_depth=4)
         ai = ComputerAI(game)
         try:
             result = ai.choose_move(state, "ultra")
@@ -113,6 +113,24 @@ class AITests(unittest.TestCase):
 
         self.assertEqual(score, -MATE_SCORE + 5)
         self.assertGreater(ai.nodes, 0)
+
+    def test_ultra_uses_shorter_targets_until_the_late_game(self):
+        game = Game()
+        ai = ComputerAI(game)
+        ai.profile = DIFFICULTIES["ultra"]
+
+        early_deadline, early_is_late = ai._soft_deadline(game.initial_state(), 0)
+
+        state = game.initial_state()
+        fixture = json.loads((FIXTURES / "old_ultra_loss_38_move_log.json").read_text())
+        for row, col, mirror in fixture["moves"][:31]:
+            state = game.resolve_move(state, Move(row - 1, col - 1, Cell(mirror))).state
+        late_deadline, late_is_late = ai._soft_deadline(state, 0)
+
+        self.assertEqual(early_deadline, 2.25)
+        self.assertFalse(early_is_late)
+        self.assertEqual(late_deadline, 6.0)
+        self.assertTrue(late_is_late)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ const elements = {
   statusLight: document.querySelector("#status-light"),
   modeLabel: document.querySelector("#mode-label"),
   log: document.querySelector("#match-log"),
+  matchMeta: document.querySelector("#match-meta"),
   moveCount: document.querySelector("#move-count"),
   aiDetail: document.querySelector("#ai-detail"),
   continueButton: document.querySelector("#continue-game"),
@@ -64,6 +65,27 @@ function difficultyName(difficulty) {
 
 function moveCount(count) {
   return `${count} ${t(count === 1 ? "move" : "moves")}`;
+}
+
+/** Format the original match start in the active language and local timezone. */
+function matchDate() {
+  const started = new Date(session.startedAt);
+  if (Number.isNaN(started.getTime())) return session.startedAt;
+  const locale = language === "fr" ? "fr-FR" : "en-CA";
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(started);
+}
+
+/** Name both participants, including the selected computer difficulty. */
+function matchupLabel() {
+  if (session.mode === "computer") {
+    return t("computerMatchup", { difficulty: difficultyName(session.difficulty) });
+  }
+  return t("localMatchup");
+}
+
+/** Build the localized date and participant line shared by the UI and clipboard. */
+function matchMetadata() {
+  return `${matchDate()} · ${matchupLabel()}`;
 }
 
 /** Create an empty browser match session with stable identity metadata. */
@@ -370,6 +392,7 @@ function renderStatus() {
 
 /** Rebuild the localized and scrollable current-match history. */
 function renderLog() {
+  elements.matchMeta.textContent = matchMetadata();
   elements.moveCount.textContent = moveCount(session.history.length);
   elements.copyLog.disabled = session.history.length === 0;
   elements.log.replaceChildren();
@@ -680,7 +703,8 @@ function migrateStoredSave() {
 function currentLogText() {
   const count = session.history.length;
   return [
-    t("matchLog"),
+    t("matchLogTitle"),
+    matchMetadata(),
     "",
     moveCount(count),
     ...session.history.map(recordSummary),
