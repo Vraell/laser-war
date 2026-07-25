@@ -90,6 +90,8 @@ export class Game {
     this.reachabilityCache = new Map();
     this.jointReachabilityCache = new Map();
     this.routeCostCache = new Map();
+    this.beamCache = new Map();
+    this.boardKeys = new WeakMap();
   }
 
   /** Create the symmetric opening position for a new match. */
@@ -261,7 +263,14 @@ export class Game {
   }
 
   fireLasers(board) {
-    return this.sources.map((source) => this.traceBeam(board, source));
+    const boardKey = this.boardKey(board);
+    if (this.beamCache.has(boardKey)) return this.beamCache.get(boardKey);
+    const beams = this.sources.map((source) => this.traceBeam(board, source));
+    this.beamCache.set(boardKey, beams);
+    if (this.beamCache.size > 4096) {
+      this.beamCache.delete(this.beamCache.keys().next().value);
+    }
+    return beams;
   }
 
   /** Trace one fired laser until it exits, loops, or strikes a piece. */
@@ -316,7 +325,7 @@ export class Game {
 
   /** Return the kings each laser could reach after future placements. */
   reachableKingsByLaser(board) {
-    const boardKey = board.map((row) => row.join("")).join("");
+    const boardKey = this.boardKey(board);
     if (this.reachabilityCache.has(boardKey)) return this.reachabilityCache.get(boardKey);
     const reachable = this.sources.map((source) => this.reachableKings(board, source));
     this.reachabilityCache.set(boardKey, reachable);
@@ -328,22 +337,84 @@ export class Game {
 
   /** Check whether both lasers can reach opposite kings on one future layout. */
   jointPathsAvailable(board) {
-    const boardKey = board.map((row) => row.join("")).join("");
+    return this.jointPathWitnesses(board) !== null;
+  }
+
+  /** Reuse compatible parent routes when one new mirror does not conflict. */
+  jointPathPreserved(parentBoard, childBoard, move) {
+    const witnesses = this.jointPathWitnesses(parentBoard);
+    if (witnesses) {
+      const squareBit = 1n << BigInt(move.row * BOARD_SIZE + move.col);
+      for (const witness of witnesses) {
+        const conflicts = Boolean(witness.empty & squareBit)
+          || (Boolean(witness.slash & squareBit) && move.mirror !== Cell.SLASH)
+          || (Boolean(witness.backslash & squareBit) && move.mirror !== Cell.BACKSLASH);
+        if (!conflicts) {
+          const usesPlacedMirror = Boolean((witness.slash | witness.backslash) & squareBit);
+          this.cacheJointWitnesses(childBoard, [{
+            ...witness,
+            mirrorCount: witness.mirrorCount - (usesPlacedMirror ? 1 : 0),
+          }]);
+          return true;
+        }
+      }
+    }
+
+    const childWitnesses = this.jointPathWitnesses(childBoard);
+    if (childWitnesses) {
+      const learned = childWitnesses[0];
+      const squareBit = 1n << BigInt(move.row * BOARD_SIZE + move.col);
+      const usesPlacedMirror = Boolean((learned.slash | learned.backslash) & squareBit);
+      const parentWitness = {
+        ...learned,
+        mirrorCount: learned.mirrorCount + (usesPlacedMirror ? 1 : 0),
+      };
+      if (witnesses && parentWitness.mirrorCount <= MAX_ROUTE_MIRRORS && !witnesses.some((witness) => (
+        witness.empty === learned.empty
+        && witness.slash === learned.slash
+        && witness.backslash === learned.backslash
+      ))) {
+        this.cacheJointWitnesses(parentBoard, [...witnesses, parentWitness]);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** Return cached compatible assignments or discover the first one. */
+  jointPathWitnesses(board) {
+    const boardKey = this.boardKey(board);
     if (this.jointReachabilityCache.has(boardKey)) return this.jointReachabilityCache.get(boardKey);
-    const available = [
+    let witness = null;
+    for (const targets of [
       ["top", "bottom"],
       ["bottom", "top"],
-    ].some((targets) => this.jointPairingAvailable(board, targets));
-    this.jointReachabilityCache.set(boardKey, available);
+    ]) {
+      witness = this.jointPairingWitness(board, targets);
+      if (witness) break;
+    }
+    const witnesses = witness ? [witness] : null;
+    this.cacheJointWitnesses(board, witnesses);
+    return witnesses;
+  }
+
+  /** Store exact joint-route witnesses in the bounded engine cache. */
+  cacheJointWitnesses(board, witnesses) {
+    const boardKey = this.boardKey(board);
+    this.jointReachabilityCache.set(boardKey, witnesses);
     if (this.jointReachabilityCache.size > 4096) {
       this.jointReachabilityCache.delete(this.jointReachabilityCache.keys().next().value);
     }
-    return available;
+  }
+
+  /** Return the first compatible shared route assignment, if one exists. */
+  jointPathWitness(board) {
+    return this.jointPathWitnesses(board)?.[0] || null;
   }
 
   /** Return minimum future-mirror counts from each laser to each king. */
   routeCostsByLaser(board) {
-    const boardKey = board.map((row) => row.join("")).join("");
+    const boardKey = this.boardKey(board);
     if (this.routeCostCache.has(boardKey)) return this.routeCostCache.get(boardKey);
     const costs = this.sources.map((source) => this.routeCosts(board, source));
     this.routeCostCache.set(boardKey, costs);
@@ -405,7 +476,7 @@ export class Game {
   }
 
   /** Find compatible route assignments for one left/right king pairing. */
-  jointPairingAvailable(board, targets) {
+  jointPairingWitness(board, targets) {
     const forbiddenTurns = this.mirrorForbiddenSquares(board);
     const leftRoutes = this.compatibleRoutes(
       board,
@@ -430,9 +501,18 @@ export class Game {
         mirrorCount,
         0n,
       );
-      if (!rightRoutes.next().done) return true;
+      const result = rightRoutes.next();
+      if (!result.done) {
+        const [witnessEmpty, witnessSlash, witnessBackslash, mirrorCount] = result.value;
+        return {
+          empty: witnessEmpty,
+          slash: witnessSlash,
+          backslash: witnessBackslash,
+          mirrorCount,
+        };
+      }
     }
-    return false;
+    return null;
   }
 
   /** Yield shared assignments that route one laser to its assigned king. */
@@ -468,9 +548,9 @@ export class Game {
     const squareBit = 1n << BigInt(nextRow * BOARD_SIZE + nextCol);
     const options = [];
     if (cell === Cell.SLASH) {
-      options.push([SLASH[direction], empty, slash, backslash, mirrorCount]);
+      options.push([SLASH[direction], empty, slash | squareBit, backslash, mirrorCount]);
     } else if (cell === Cell.BACKSLASH) {
-      options.push([BACKSLASH[direction], empty, slash, backslash, mirrorCount]);
+      options.push([BACKSLASH[direction], empty, slash, backslash | squareBit, mirrorCount]);
     } else if (empty & squareBit) {
       options.push([direction, empty, slash, backslash, mirrorCount]);
     } else if (slash & squareBit) {
@@ -573,6 +653,16 @@ export class Game {
 
   inBounds(row, col) {
     return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
+  }
+
+  /** Return a stable serialized key for an immutable search board. */
+  boardKey(board) {
+    let boardKey = this.boardKeys.get(board);
+    if (!boardKey) {
+      boardKey = board.map((row) => row.join("")).join("");
+      this.boardKeys.set(board, boardKey);
+    }
+    return boardKey;
   }
 }
 

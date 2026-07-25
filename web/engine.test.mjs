@@ -127,7 +127,7 @@ assert.notDeepEqual(correctedChoice.move, selfKill);
 assert.notEqual(correctedOutcome.state.winner, "bottom");
 
 const forcedLossFixture = JSON.parse(readFileSync(
-  new URL("../tests/fixtures/forced_loss_40_move_log.json", import.meta.url),
+  new URL("./fixtures/forced_loss_40_move_log.json", import.meta.url),
   "utf8",
 ));
 let forcedLossState = game.initialState();
@@ -147,7 +147,7 @@ assert.equal(game.isLegalMove(forcedLossState, forcedChoice.move), true);
 assert.equal(game.resolveMove(forcedLossState, forcedChoice.move).state.winner, "bottom");
 
 const incompatibleFixture = JSON.parse(readFileSync(
-  new URL("../tests/fixtures/incompatible_28_move_log.json", import.meta.url),
+  new URL("./fixtures/incompatible_28_move_log.json", import.meta.url),
   "utf8",
 ));
 let incompatibleState = game.initialState();
@@ -165,6 +165,71 @@ assert.deepEqual(
   [["bottom", "top"], ["bottom", "top"]],
 );
 assert.equal(game.jointPathsAvailable(legacyOutcome.state.board), false);
+assert.equal(
+  game.jointPathPreserved(incompatibleState.board, legacyOutcome.state.board, closingMove),
+  false,
+);
 assert.equal(game.illegalMoveReason(incompatibleState, closingMove), "incompatiblePaths");
 
-console.log("Native web engine checks passed.");
+const witnessFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_18_move_log.json", import.meta.url),
+  "utf8",
+));
+const acceleratedGame = new Game();
+let witnessState = acceleratedGame.initialState();
+for (const [row, col, mirror] of witnessFixture.moves.slice(0, 13)) {
+  witnessState = acceleratedGame.resolveMove(witnessState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const exactGame = new Game();
+for (const { move, state: child } of acceleratedGame.legalChildren(witnessState, false)) {
+  assert.equal(
+    acceleratedGame.jointPathPreserved(witnessState.board, child.board, move),
+    exactGame.jointPathsAvailable(child.board),
+  );
+}
+
+const budgetBoard = [
+  "\\..OkO/.\\",
+  "/.\\OOO./\\",
+  "/\\\\\\O/../",
+  "/..\\//\\..",
+  ".///\\....",
+  "\\\\./.\\\\./",
+  "..\\/O//\\\\",
+  "..\\......",
+  "//\\.KO..\\",
+].map((row) => [...row]);
+const budgetState = {
+  board: budgetBoard,
+  turn: "top",
+  winner: null,
+  draw: false,
+};
+const budgetGame = new Game();
+const budgetChildren = budgetGame.legalChildren(budgetState, false);
+const learnedMove = { row: 4, col: 6, mirror: "/" };
+const rejectedMove = { row: 4, col: 5, mirror: "/" };
+const learnedChild = budgetChildren.find(({ move }) => (
+  move.row === learnedMove.row && move.col === learnedMove.col && move.mirror === learnedMove.mirror
+));
+const rejectedChild = budgetChildren.find(({ move }) => (
+  move.row === rejectedMove.row && move.col === rejectedMove.col && move.mirror === rejectedMove.mirror
+));
+assert.equal(
+  budgetGame.jointPathPreserved(budgetBoard, learnedChild.state.board, learnedMove),
+  true,
+);
+assert.equal(new Game().jointPathsAvailable(rejectedChild.state.board), false);
+assert.equal(
+  budgetGame.jointPathPreserved(budgetBoard, rejectedChild.state.board, rejectedMove),
+  false,
+);
+assert.ok(
+  budgetGame.jointPathWitnesses(budgetBoard).every(({ mirrorCount }) => mirrorCount <= 5),
+);
+
+console.log("Web engine checks passed.");

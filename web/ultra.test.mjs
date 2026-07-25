@@ -49,7 +49,7 @@ assert.notDeepEqual(result.move, { row: 0, col: 8, mirror: "/" });
 assert.ok(search.killers.size > 0, "Ultra should retain cutoff moves for ordering.");
 
 const fixture = JSON.parse(readFileSync(
-  new URL("../tests/fixtures/forced_loss_40_move_log.json", import.meta.url),
+  new URL("./fixtures/forced_loss_40_move_log.json", import.meta.url),
 ));
 let forcedState = game.initialState();
 for (const [row, col, mirror] of fixture.moves.slice(0, -1)) {
@@ -62,10 +62,9 @@ for (const [row, col, mirror] of fixture.moves.slice(0, -1)) {
 const horizonSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const horizonScore = horizonSearch.stabilizedEvaluation(forcedState, 4);
 assert.equal(horizonScore, -9995);
-assert.ok(horizonSearch.legalityCache.size > 0);
 
 const reportedFixture = JSON.parse(readFileSync(
-  new URL("../tests/fixtures/ultra_loss_30_move_log.json", import.meta.url),
+  new URL("./fixtures/ultra_loss_30_move_log.json", import.meta.url),
 ));
 let reportedState = game.initialState();
 for (const [row, col, mirror] of reportedFixture.moves.slice(0, 29)) {
@@ -86,6 +85,50 @@ assert.equal(apparentSurvivals.length, 1);
 assert.deepEqual(reportedSearch.strictSubset(reportedState, apparentSurvivals, 8), []);
 assert.equal(reportedSearch.stabilizedEvaluation(reportedState, 4), -9995);
 
+const forcingFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_18_move_log.json", import.meta.url),
+));
+let forcingState = game.initialState();
+for (const [row, col, mirror] of forcingFixture.moves.slice(0, 16)) {
+  forcingState = game.resolveMove(forcingState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const forcingSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
+assert.equal(forcingSearch.forcingSetupScore(forcingState, 3), 9995);
+const [forcingRow, forcingCol, forcingMirror] = forcingFixture.moves[16];
+const exposedStateFromLog = game.resolveMove(forcingState, {
+  row: forcingRow - 1,
+  col: forcingCol - 1,
+  mirror: forcingMirror,
+}).state;
+assert.equal(forcingSearch.isForcedExposure(exposedStateFromLog), true);
+assert.ok(
+  game.legalChildren(exposedStateFromLog).every(({ state: child }) => child.winner === "bottom"),
+);
+
+const decisionGame = new Game();
+let decisionState = decisionGame.initialState();
+for (const [row, col, mirror] of forcingFixture.moves.slice(0, 13)) {
+  decisionState = decisionGame.resolveMove(decisionState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const decisionSearch = new UltraSearch(decisionGame, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 3,
+  rootLimit: 12,
+  branchLimits: [10, 8, 6],
+});
+const defensiveDecision = decisionSearch.choose(decisionState);
+assert.equal(defensiveDecision.depth, 3);
+assert.deepEqual(defensiveDecision.move, { row: 3, col: 2, mirror: "\\" });
+assert.notDeepEqual(defensiveDecision.move, { row: 3, col: 3, mirror: "\\" });
+
 const protectedState = game.initialState("top");
 const pressureSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const protectedScore = pressureSearch.strategicEvaluation(protectedState);
@@ -105,7 +148,7 @@ assert.equal(
 );
 
 const earlyLossFixture = JSON.parse(readFileSync(
-  new URL("../tests/fixtures/ultra_loss_10_move_log.json", import.meta.url),
+  new URL("./fixtures/ultra_loss_10_move_log.json", import.meta.url),
 ));
 let earlyLossState = game.initialState();
 for (const [row, col, mirror] of earlyLossFixture.moves.slice(0, 9)) {

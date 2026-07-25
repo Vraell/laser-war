@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.3";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.4";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
@@ -174,6 +174,10 @@ export class UltraSearch {
     this.childrenCache = new Map();
     this.strictChildren = new Set();
     this.legalityCache = new Map();
+    this.evaluationCache = new Map();
+    this.forcingCache = new Map();
+    this.forcedExposureCache = new Map();
+    this.stateKeys = new WeakMap();
   }
 
   /** Choose a move with iterative deepening under the Ultra budget. */
@@ -181,7 +185,7 @@ export class UltraSearch {
     const started = this.now();
     this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
-    const rootKey = stateKey(state);
+    const rootKey = this.keyForState(state);
     const fastChildren = this.game.legalChildren(state, false);
     this.childrenCache.set(rootKey, fastChildren);
     const children = this.selectRootChildren(state);
@@ -230,15 +234,10 @@ export class UltraSearch {
 
   /** Rank approximate root moves, then retain only fully legal candidates. */
   selectRootChildren(state) {
-    const key = stateKey(state);
-    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
-    const legality = this.legalityCache.get(key);
+    const key = this.keyForState(state);
     const selected = [];
     for (const item of this.orderedChildren(state, 0)) {
-      const keyForMove = moveKey(item.move);
-      const legal = this.game.isLegalMove(state, item.move);
-      legality.set(keyForMove, legal);
-      if (legal) selected.push(item);
+      if (this.strictChild(state, item.move, item.state)) selected.push(item);
       if (selected.length === this.profile.rootLimit) break;
     }
     return selected;
@@ -274,7 +273,7 @@ export class UltraSearch {
 
     const originalAlpha = alpha;
     const originalBeta = beta;
-    const cacheKey = `${stateKey(state)}|${depth}`;
+    const cacheKey = `${this.keyForState(state)}|${depth}`;
     if (this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
       if (cached.bound === "exact") return cached.value;
@@ -312,7 +311,7 @@ export class UltraSearch {
         break;
       }
     }
-    if (bestMove) this.ordering.set(stateKey(state), moveKey(bestMove));
+    if (bestMove) this.ordering.set(this.keyForState(state), moveKey(bestMove));
     let bound = "exact";
     if (value <= originalAlpha) bound = "upper";
     else if (value >= originalBeta) bound = "lower";
@@ -322,7 +321,7 @@ export class UltraSearch {
 
   /** Return legal children sorted by tactical search priority. */
   orderedChildren(state, ply = 0) {
-    const key = stateKey(state);
+    const key = this.keyForState(state);
     let children = this.childrenCache.get(key);
     if (!children) {
       children = this.game.legalChildren(state, false);
@@ -338,21 +337,38 @@ export class UltraSearch {
 
   /** Select the highest-ranked fully legal children up to one branch limit. */
   strictSubset(state, children, limit) {
-    const key = stateKey(state);
+    const key = this.keyForState(state);
     if (this.strictChildren.has(key)) return children.slice(0, limit);
-    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
-    const legality = this.legalityCache.get(key);
     const selected = [];
     for (const item of children) {
       this.checkInterrupted();
-      const keyForMove = moveKey(item.move);
-      if (!legality.has(keyForMove)) {
-        legality.set(keyForMove, this.game.isLegalMove(state, item.move));
-      }
-      if (legality.get(keyForMove)) selected.push(item);
+      if (this.strictChild(state, item.move, item.state)) selected.push(item);
       if (selected.length === limit) break;
     }
     return selected;
+  }
+
+  /** Return a fully legal child while sharing exact validator results. */
+  strictChild(state, move, fastChild = null) {
+    const key = this.keyForState(state);
+    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
+    const legality = this.legalityCache.get(key);
+    const keyForMove = moveKey(move);
+    if (legality.get(keyForMove) === false) return null;
+    if (legality.get(keyForMove) === true && fastChild) return fastChild;
+    if (fastChild) {
+      const legal = this.game.jointPathPreserved(state.board, fastChild.board, move);
+      legality.set(keyForMove, legal);
+      return legal ? fastChild : null;
+    }
+    try {
+      const child = this.game.resolveMove(state, move, false).state;
+      legality.set(keyForMove, true);
+      return fastChild || child;
+    } catch {
+      legality.set(keyForMove, false);
+      return null;
+    }
   }
 
   /** Rank a move for ordering without changing its position value. */
@@ -377,8 +393,10 @@ export class UltraSearch {
 
   /** Extend exposed-king horizons through all legal tactical evasions. */
   stabilizedEvaluation(state, ply) {
-    const score = this.strategicEvaluation(state);
-    if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing)) return score;
+    if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing)) {
+      const forcingScore = this.forcingSetupScore(state, ply);
+      return forcingScore ?? this.strategicEvaluation(state);
+    }
 
     const opponent = state.turn === "top" ? "bottom" : "top";
     const apparentSurvivals = this.orderedChildren(state, ply)
@@ -395,8 +413,81 @@ export class UltraSearch {
     return best === -Infinity ? -MATE_SCORE + (ply + 1) : best;
   }
 
+  /** Detect a legal setup that leaves the opposing king without an escape. */
+  forcingSetupScore(state, ply) {
+    const key = this.keyForState(state);
+    if (this.forcingCache.has(key)) {
+      const distance = this.forcingCache.get(key);
+      return distance === null ? null : MATE_SCORE - (ply + distance);
+    }
+
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    for (const move of this.game.pseudoMoves(state)) {
+      this.checkInterrupted();
+      const placed = state.board.map((row) => [...row]);
+      placed[move.row][move.col] = move.mirror;
+      const beams = this.game.fireLasers(placed);
+      const hitKings = new Set(beams.map((beam) => beam.hitKing).filter(Boolean));
+      if (hitKings.has(opponent)) {
+        const child = this.strictChild(state, move);
+        if (child?.winner === own) {
+          this.forcingCache.set(key, 1);
+          return MATE_SCORE - (ply + 1);
+        }
+        continue;
+      }
+      const destroyed = beams.map((beam) => beam.hitShield).filter(Boolean);
+      if (!destroyed.length) continue;
+      const damaged = placed.map((row) => [...row]);
+      for (const [row, col] of destroyed) damaged[row][col] = Cell.EMPTY;
+      if (!this.game.fireLasers(damaged).some((beam) => beam.hitKing === opponent)) continue;
+      const child = this.strictChild(state, move);
+      if (!child || child.winner || child.draw) continue;
+      if (this.isForcedExposure(child)) {
+        this.forcingCache.set(key, 2);
+        return MATE_SCORE - (ply + 2);
+      }
+    }
+    this.forcingCache.set(key, null);
+    return null;
+  }
+
+  /** Return whether the side to move has no legal way to survive an exposed king. */
+  isForcedExposure(state) {
+    const key = this.keyForState(state);
+    if (this.forcedExposureCache.has(key)) return this.forcedExposureCache.get(key);
+
+    const defender = state.turn;
+    const attacker = defender === "top" ? "bottom" : "top";
+    if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing === defender)) {
+      this.forcedExposureCache.set(key, false);
+      return false;
+    }
+
+    for (const move of this.game.pseudoMoves(state)) {
+      this.checkInterrupted();
+      let child;
+      try {
+        child = this.game.resolveMove(state, move, false, false).state;
+      } catch {
+        continue;
+      }
+      if (child.winner === attacker) continue;
+      if (this.strictChild(state, move, child)) {
+        this.forcedExposureCache.set(key, false);
+        return false;
+      }
+    }
+    this.forcedExposureCache.set(key, true);
+    return true;
+  }
+
   /** Score shield shape, live beam pressure, and route resilience. */
   strategicEvaluation(state) {
+    const key = this.keyForState(state);
+    if (this.evaluationCache.has(key)) return this.evaluationCache.get(key);
+
     let score = this.game.evaluate(state);
     const own = state.turn;
     const opponent = own === "top" ? "bottom" : "top";
@@ -415,6 +506,7 @@ export class UltraSearch {
     const hitKings = new Set(this.game.fireLasers(state.board).map((beam) => beam.hitKing).filter(Boolean));
     if (hitKings.has(opponent)) score += 240;
     if (hitKings.has(own)) score -= 240;
+    this.evaluationCache.set(key, score);
     return score;
   }
 
@@ -442,6 +534,16 @@ export class UltraSearch {
     return score;
   }
 
+  /** Return a stable serialized key for an immutable search state. */
+  keyForState(state) {
+    let key = this.stateKeys.get(state);
+    if (!key) {
+      key = stateKey(state);
+      this.stateKeys.set(state, key);
+    }
+    return key;
+  }
+
   /** Abort once the configured search deadline is reached. */
   checkInterrupted() {
     if (this.now() >= this.deadline) throw new SearchInterrupted();
@@ -451,7 +553,12 @@ export class UltraSearch {
   softTiming(state, started) {
     const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
     const latePosition = mirrors >= 31;
-    const softLimit = latePosition ? 6000 : mirrors >= 12 ? 3500 : 2250;
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
+    const threatenedShields = this.game.fireLasers(state.board).some((beam) => beam.hitShield);
+    const tacticalEmergency = routePressure <= -180 || threatenedShields;
+    const softLimit = latePosition ? 6000 : tacticalEmergency ? 4750 : mirrors >= 12 ? 3500 : 2250;
     return {
       latePosition,
       softDeadline: Math.min(this.deadline, started + softLimit),

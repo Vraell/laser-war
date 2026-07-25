@@ -1,109 +1,53 @@
 # Laser War
 
-A polished desktop reconstruction of the mirror-and-laser strategy game.
-
-## Play Online
-
-Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). No installation or Python runtime
-is required. Every move is saved immediately in that browser so an interrupted match can continue. Use
-**Copy** beside the in-game match log to place the titled, dated, participant-labelled log on the clipboard.
+A browser-based mirror-and-laser strategy game.
 
 ## Play
 
-Requires Python 3.10 or newer.
+Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). The game requires no installation
+and works on desktop and mobile browsers.
 
-```bash
-python3.11 -m pip install -e .
-python3.11 -m laser_war
-```
+Features include:
 
-The game includes:
-
-- computer opponents with Easy, Medium, Hard, and unlockable Ultra search profiles;
-- local two-player mode;
-- a persistent English/French interface;
-- scalable 60 FPS rendering;
-- animated simultaneous lasers, impacts, particles, and synthesized sound;
-- legal-move highlighting, forbidden-square markings, and reason-specific move feedback;
-- a clearly retained final laser volley after a win or draw;
+- Easy, Medium, Hard, and unlockable Ultra computer opponents;
+- local two-player play;
+- English and French interfaces;
+- animated simultaneous lasers, impacts, sound, and a retained final volley;
+- legal-move feedback and forbidden-square markings;
 - a shared-route anti-fortress rule that keeps both kings and both lasers viable;
-- pause, undo, redo, restart, autosave, and continue;
-- a validated recent-match history with damage events;
-- a scrollable current-match log with one-click clipboard copying.
+- automatic in-browser match saves and a clipboard-ready match log.
 
-Ultra unlocks after the player defeats the Hard computer. Progress is stored locally on each device.
-Ultra combines time-bounded iterative-deepening alpha-beta search with tactical king-threat stabilization, mate-distance
-scoring, shield and laser-route evaluation, and principal-variation, history, and killer-move ordering.
-An earned Ultra unlock is preserved when the progress-data format or game version changes.
-
-The interface uses the bundled Inter typeface under the SIL Open Font License.
-
-## Controls
-
-- `Q` selects the `/` mirror.
-- `E` selects the `\` mirror.
-- `U` undoes the latest turn.
-- `R` restarts the match.
-- `Escape` pauses.
+Ultra unlocks after defeating Hard. Progress and the current match are stored locally in the browser and
+survive game updates.
 
 ## Development
 
-Run the tests:
+The application is static HTML, CSS, and JavaScript. No package installation or compilation is required.
+
+Run all tests:
 
 ```bash
-python3.11 -m unittest
+node --test web/*.test.mjs
 ```
 
-Install development tools and run quality checks:
+Compare every difficulty against the previous AI revision with paired, color-swapped games:
 
 ```bash
-python3.11 -m pip install -e ".[dev]"
-ruff check .
-coverage run -m unittest
-coverage report
+node scripts/elo_benchmark.mjs --pairs 12 --baseline-ref HEAD
 ```
 
-Build the native browser version locally:
+The arena reports win/draw/loss results, estimated Elo change with a 95% interval, illegal moves, and average
+search time. The Pages workflow runs a bounded arena before every deployment and rejects statistically supported
+strength regressions.
+
+Build and validate the GitHub Pages artifact:
 
 ```bash
 ./scripts/build_web.sh
+node scripts/check_web_build.mjs
 ```
 
-The static site is written to `build/web`. It is a small HTML, CSS, and JavaScript client that implements the
-same board, laser, damage, king-safety, and anti-fortress rules as the Python engine without a WebAssembly
-startup delay.
+The staged site is written to `build/web`. Ultra runs in a Web Worker so its iterative-deepening search does
+not block input or rendering.
 
-The rules engine is independent of Pygame. `session.py` owns reversible match history and saves, `progress.py`
-owns monotonic unlock progression, `ai.py` owns time-bounded search, and `pygame_app.py` owns presentation and input.
-The browser runs computer searches in a Web Worker so deeper searches do not block touch or rendering.
-
-The Python client updates one JSON record per match after every move. On macOS these records are stored in
-`~/Library/Application Support/Laser War/matches/`; equivalent per-user application-data directories are used
-on Windows and Linux.
-
-See `docs/LASER_WAR_RULES.md` for the reconstructed rules.
-
-## Windows
-
-Download the latest installer from the GitHub Releases page. It installs for the current user, requires no
-Python installation or administrator access, and adds Start menu and optional desktop shortcuts.
-
-The portable ZIP contains the same game without an installer: extract the full folder and run `Laser War.exe`.
-
-To build both packages on Windows:
-
-```powershell
-./scripts/build_windows.ps1
-```
-
-This requires Python 3.11 and Inno Setup 6. Tagged GitHub releases build and publish both packages automatically.
-
-## Optional macOS App
-
-The Python command remains the primary development workflow. To produce a normal application bundle:
-
-```bash
-./scripts/build_macos.sh
-```
-
-The bundle is written to `dist/Laser War.app`.
+See [docs/LASER_WAR_RULES.md](docs/LASER_WAR_RULES.md) for the complete rules.
