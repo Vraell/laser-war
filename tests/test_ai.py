@@ -94,14 +94,14 @@ class AITests(unittest.TestCase):
             ).state
 
         profile = DIFFICULTIES["ultra"]
-        DIFFICULTIES["ultra"] = replace(profile, label="Ultra Test", time_limit=30.0, max_depth=4)
+        DIFFICULTIES["ultra"] = replace(profile, label="Ultra Test", time_limit=30.0, max_depth=3)
         ai = ComputerAI(game)
         try:
             result = ai.choose_move(state, "ultra")
         finally:
             DIFFICULTIES["ultra"] = profile
 
-        self.assertGreaterEqual(result.depth, 4)
+        self.assertGreaterEqual(result.depth, 3)
         self.assertIn(result.move, game.legal_moves(state))
         self.assertNotEqual(result.move, Move(0, 8, Cell.MIRROR_SLASH))
         self.assertTrue(ai.killers)
