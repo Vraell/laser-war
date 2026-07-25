@@ -38,13 +38,19 @@ function cloneState(state) {
   };
 }
 
+function illegalMove(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 export class Game {
   constructor() {
     this.sources = [
       [MIDDLE_ROW, -1, "E"],
       [MIDDLE_ROW, BOARD_SIZE, "W"],
     ];
-    this.noMirrorSquares = new Set([key(MIDDLE_ROW, 0), key(MIDDLE_ROW, BOARD_SIZE - 1)]);
+    this.laserEntrySquares = new Set([key(MIDDLE_ROW, 0), key(MIDDLE_ROW, BOARD_SIZE - 1)]);
     this.reachabilityCache = new Map();
   }
 
@@ -87,20 +93,31 @@ export class Game {
     }
   }
 
-  resolveMove(state, move, checkNoLegalMoves = true) {
-    if (state.winner || state.draw) throw new Error("The game is already over.");
-    if (![Cell.SLASH, Cell.BACKSLASH].includes(move.mirror)) {
-      throw new Error("A move must place a mirror.");
+  illegalMoveReason(state, move) {
+    try {
+      this.resolveMove(state, move, false);
+      return null;
+    } catch (error) {
+      return error.code || "illegalMove";
     }
-    if (!this.inBounds(move.row, move.col)) throw new Error("Move is outside the board.");
+  }
+
+  resolveMove(state, move, checkNoLegalMoves = true) {
+    if (state.winner || state.draw) throw illegalMove("gameOver", "The game is already over.");
+    if (![Cell.SLASH, Cell.BACKSLASH].includes(move.mirror)) {
+      throw illegalMove("invalidMirror", "A move must place a mirror.");
+    }
+    if (!this.inBounds(move.row, move.col)) throw illegalMove("outsideBoard", "Move is outside the board.");
     const forbidden = this.mirrorForbiddenSquares(state.board);
     if (forbidden.has(key(move.row, move.col))) {
-      if (this.noMirrorSquares.has(key(move.row, move.col))) {
-        throw new Error("No mirror can be placed directly in front of a laser.");
+      if (this.laserEntrySquares.has(key(move.row, move.col))) {
+        throw illegalMove("laserEntry", "No mirror can be placed directly in front of a laser.");
       }
-      throw new Error("No mirror can be placed adjacent to a king.");
+      throw illegalMove("kingAdjacent", "No mirror can be placed adjacent to a king.");
     }
-    if (state.board[move.row][move.col] !== Cell.EMPTY) throw new Error("Move square is not empty.");
+    if (state.board[move.row][move.col] !== Cell.EMPTY) {
+      throw illegalMove("occupied", "Move square is not empty.");
+    }
 
     const placed = cloneBoard(state.board);
     placed[move.row][move.col] = move.mirror;
@@ -127,14 +144,15 @@ export class Game {
     } else {
       const reachable = this.reachableKingsByLaser(damaged);
       if (!reachable.some((kings) => kings.has(own))) {
-        throw new Error("That move blocks every possible laser path to your king.");
+        throw illegalMove("ownKingUnreachable", "That move blocks every possible laser path to your king.");
       }
       if (!reachable.some((kings) => kings.has(opponent))) {
-        throw new Error("That move blocks every possible laser path to the opposing king.");
+        throw illegalMove("opponentKingUnreachable", "That move blocks every possible laser path to the opposing king.");
       }
       for (let index = 0; index < reachable.length; index += 1) {
         if (!reachable[index].size) {
-          throw new Error(`That move strands the ${index === 0 ? "left" : "right"} laser.`);
+          const side = index === 0 ? "left" : "right";
+          throw illegalMove(`${side}LaserStranded`, `That move strands the ${side} laser.`);
         }
       }
       nextState = { board: damaged, turn: opponent, winner: null, draw: false };
@@ -165,7 +183,7 @@ export class Game {
   }
 
   mirrorForbiddenSquares(board) {
-    return new Set([...this.noMirrorSquares, ...this.kingAdjacentSquares(board)]);
+    return new Set([...this.laserEntrySquares, ...this.kingAdjacentSquares(board)]);
   }
 
   kingAdjacentSquares(board) {

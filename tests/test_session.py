@@ -40,6 +40,14 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(loaded.events, session.events)
             self.assertEqual(loaded.history[0].summary, session.history[0].summary)
 
+    def test_summary_can_be_rendered_in_french_without_changing_saved_actor(self):
+        session = GameSession(mode="computer")
+        record = session.play(Move(4, 4, Cell.MIRROR_SLASH), "you")
+
+        self.assertIn("Vous", record.summary_for("fr"))
+        self.assertIn("L5C5", record.summary_for("fr"))
+        self.assertEqual(record.actor, "you")
+
     def test_match_log_updates_one_file_and_preserves_every_move(self):
         session = GameSession(mode="local")
         session.play(Move(4, 4, Cell.MIRROR_SLASH), "Bottom")

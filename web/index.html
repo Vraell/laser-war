@@ -13,29 +13,36 @@
     <section class="menu-screen" id="menu-screen">
       <div class="menu-shade"></div>
       <div class="menu-content">
-        <p class="kicker">TACTICAL MIRROR STRATEGY</p>
+        <p class="kicker" data-i18n="tagline">TACTICAL MIRROR STRATEGY</p>
         <h1>LASER WAR</h1>
         <div class="menu-actions">
-          <button class="primary" id="start-computer">Play vs Computer</button>
-          <button id="start-local">Local Two Player</button>
-          <button id="continue-game" disabled>Continue</button>
+          <button class="primary" id="start-computer" data-i18n="playComputer">Play vs Computer</button>
+          <button id="start-local" data-i18n="localTwoPlayer">Local Two Player</button>
+          <button id="continue-game" data-i18n="continue" disabled>Continue</button>
         </div>
         <fieldset class="difficulty">
-          <legend>DIFFICULTY</legend>
-          <label><input type="radio" name="difficulty" value="easy"><span>Easy</span></label>
-          <label><input type="radio" name="difficulty" value="medium" checked><span>Medium</span></label>
-          <label><input type="radio" name="difficulty" value="hard"><span>Hard</span></label>
+          <legend data-i18n="difficulty">DIFFICULTY</legend>
+          <label><input type="radio" name="difficulty" value="easy"><span data-i18n="easy">Easy</span></label>
+          <label><input type="radio" name="difficulty" value="medium" checked><span data-i18n="medium">Medium</span></label>
+          <label><input type="radio" name="difficulty" value="hard"><span data-i18n="hard">Hard</span></label>
           <label class="ultra-option">
             <input id="ultra-difficulty" type="radio" name="difficulty" value="ultra" disabled>
-            <span>Ultra <small id="ultra-state">LOCKED</small></span>
+            <span><b data-i18n="ultra">Ultra</b><small id="ultra-state">LOCKED</small></span>
           </label>
         </fieldset>
         <p class="progress-note" id="progress-note">Defeat Hard to unlock Ultra.</p>
+        <div class="language-bar">
+          <span data-i18n="language">LANGUAGE</span>
+          <div class="language-toggle" role="group" aria-label="Language" data-i18n-aria="language">
+            <button type="button" data-language="en" aria-pressed="true">EN</button>
+            <button type="button" data-language="fr" aria-pressed="false">FR</button>
+          </div>
+        </div>
         <div class="menu-utilities">
-          <button class="quiet" id="show-rules">Rules</button>
+          <button class="quiet" id="show-rules" data-i18n="rules">Rules</button>
         </div>
       </div>
-      <span class="version">v0.6 web</span>
+      <span class="version">v0.7 web</span>
     </section>
 
     <main class="game-screen" id="game-screen" hidden>
@@ -48,53 +55,53 @@
       </header>
 
       <div class="game-layout">
-        <section class="board-region" aria-label="Laser War board">
+        <section class="board-region" aria-label="Laser War board" data-i18n-aria="boardRegion">
           <div class="board-stage">
             <div class="laser-source left-source" aria-hidden="true"><span></span></div>
             <div class="board-frame">
               <div class="column-labels" id="column-labels"></div>
               <div class="row-labels" id="row-labels"></div>
-              <div class="board" id="board" role="grid" aria-label="9 by 9 game board"></div>
+              <div class="board" id="board" role="grid" aria-label="9 by 9 game board" data-i18n-aria="boardGrid"></div>
               <svg class="beams" id="beams" viewBox="0 0 900 900" preserveAspectRatio="none" aria-hidden="true"></svg>
             </div>
             <div class="laser-source right-source" aria-hidden="true"><span></span></div>
-            <div class="result-overlay" id="result-overlay" hidden>
-              <div class="result-copy">
-                <p class="eyebrow">MATCH COMPLETE</p>
-                <h2 id="result-title">VICTORY</h2>
-                <p id="result-detail"></p>
-              </div>
-              <div>
-                <button class="primary" id="play-again">Play Again</button>
-                <button id="result-menu">Main Menu</button>
-              </div>
-            </div>
           </div>
         </section>
 
         <aside class="side-panel">
+          <div class="result-overlay" id="result-overlay" hidden>
+            <div class="result-copy">
+              <p class="eyebrow" data-i18n="matchComplete">MATCH COMPLETE</p>
+              <h2 id="result-title">VICTORY</h2>
+              <p id="result-detail"></p>
+            </div>
+            <div class="result-actions">
+              <button class="primary" id="play-again" data-i18n="playAgain">Play Again</button>
+              <button id="result-menu" data-i18n="mainMenu">Main Menu</button>
+            </div>
+          </div>
           <div class="status-block">
             <span class="status-light" id="status-light"></span>
             <div>
-              <p class="eyebrow" id="turn-label">MATCH STATUS</p>
+              <p class="eyebrow" id="turn-label" data-i18n="matchStatus">MATCH STATUS</p>
               <h2 id="status">Your turn</h2>
             </div>
           </div>
 
           <section class="control-band">
-            <p class="eyebrow">MIRROR</p>
-            <div class="mirror-picker" role="group" aria-label="Mirror orientation">
-              <button class="mirror-choice selected" id="select-slash" aria-label="Select slash mirror">/</button>
-              <button class="mirror-choice" id="select-backslash" aria-label="Select backslash mirror">\</button>
+            <p class="eyebrow" data-i18n="mirror">MIRROR</p>
+            <div class="mirror-picker" role="group" aria-label="Mirror orientation" data-i18n-aria="mirrorOrientation">
+              <button class="mirror-choice selected" id="select-slash" aria-label="Select slash mirror" data-i18n-aria="selectSlash">/</button>
+              <button class="mirror-choice" id="select-backslash" aria-label="Select backslash mirror" data-i18n-aria="selectBackslash">\</button>
             </div>
           </section>
 
           <section class="log-band">
             <div class="section-heading">
-              <p class="eyebrow">MATCH LOG</p>
+              <p class="eyebrow" data-i18n="matchLog">MATCH LOG</p>
               <div class="log-summary">
                 <span id="move-count">0 moves</span>
-                <button class="log-copy" id="copy-log" aria-label="Copy match log" title="Copy match log">Copy</button>
+                <button class="log-copy" id="copy-log" aria-label="Copy match log" title="Copy match log" data-i18n="copy" data-i18n-aria="copyMatchLog" data-i18n-title="copyMatchLog">Copy</button>
               </div>
             </div>
             <ol id="match-log"><li class="empty-log">Awaiting the first move.</li></ol>
@@ -102,37 +109,37 @@
 
           <div class="ai-detail" id="ai-detail" aria-live="polite"></div>
           <footer class="match-actions">
-            <button id="new-match">New Match</button>
-            <button id="main-menu">Main Menu</button>
-            <button class="icon-button" id="sound-toggle" aria-label="Toggle sound" title="Toggle sound">♪</button>
+            <button id="new-match" data-i18n="newMatch">New Match</button>
+            <button id="main-menu" data-i18n="mainMenu">Main Menu</button>
+            <button class="icon-button" id="sound-toggle" aria-label="Toggle sound" title="Toggle sound" data-i18n-title="toggleSound">♪</button>
           </footer>
         </aside>
       </div>
     </main>
 
     <div class="pause-overlay" id="pause-overlay" hidden>
-      <h2>PAUSED</h2>
-      <button class="primary" id="resume">Resume</button>
-      <button id="pause-restart">Restart Match</button>
-      <button id="pause-menu">Main Menu</button>
+      <h2 data-i18n="paused">PAUSED</h2>
+      <button class="primary" id="resume" data-i18n="resume">Resume</button>
+      <button id="pause-restart" data-i18n="restartMatch">Restart Match</button>
+      <button id="pause-menu" data-i18n="mainMenu">Main Menu</button>
     </div>
 
     <dialog id="rules-dialog">
       <form method="dialog">
         <header>
           <div>
-            <p class="kicker">FIELD MANUAL</p>
-            <h2>How to Play</h2>
+            <p class="kicker" data-i18n="fieldManual">FIELD MANUAL</p>
+            <h2 data-i18n="howToPlay">How to Play</h2>
           </div>
-          <button class="icon-button" value="close" aria-label="Close rules">×</button>
+          <button class="icon-button" value="close" aria-label="Close rules" data-i18n-aria="closeRules">×</button>
         </header>
         <div class="rules-grid">
-          <section><h3>Place</h3><p>Choose / or \ and place one mirror on a highlighted empty square.</p></section>
-          <section><h3>Fire</h3><p>Both side lasers fire after every move. Mirrors turn a beam by 90 degrees.</p></section>
-          <section><h3>Damage</h3><p>A beam destroys the first shield it touches. Mirrors are permanent.</p></section>
-          <section><h3>Win</h3><p>Hit the opposing king without hitting your own. A simultaneous hit is a draw.</p></section>
-          <section><h3>Restrictions</h3><p>Mirrors cannot touch a king. Both kings and both lasers must retain a possible path.</p></section>
-          <section><h3>Paths</h3><p>Each laser must retain a route to a king, and one must retain a route to yours.</p></section>
+          <section><h3 data-i18n="place">Place</h3><p data-i18n="placeRule">Choose / or \ and place one mirror on a highlighted empty square.</p></section>
+          <section><h3 data-i18n="fire">Fire</h3><p data-i18n="fireRule">Both side lasers fire after every move. Mirrors turn a beam by 90 degrees.</p></section>
+          <section><h3 data-i18n="damage">Damage</h3><p data-i18n="damageRule">A beam destroys the first shield it touches. Mirrors are permanent.</p></section>
+          <section><h3 data-i18n="win">Win</h3><p data-i18n="winRule">Hit the opposing king without hitting your own. A simultaneous hit is a draw.</p></section>
+          <section><h3 data-i18n="restrictions">Restrictions</h3><p data-i18n="restrictionsRule">Mirrors cannot touch a king. Both kings and both lasers must retain a possible path.</p></section>
+          <section><h3 data-i18n="paths">Paths</h3><p data-i18n="pathsRule">Each laser must retain a route to a king, and one must retain a route to yours.</p></section>
         </div>
       </form>
     </dialog>

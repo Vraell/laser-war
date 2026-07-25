@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from .engine import Cell, Game, Move, MoveOutcome, State
+from .i18n import translate
 from .storage import write_json_atomic
 
 SAVE_VERSION = 2
@@ -23,18 +24,44 @@ class TurnRecord:
 
     @property
     def summary(self) -> str:
+        return self.summary_for("en")
+
+    def summary_for(self, language: str) -> str:
         effects: list[str] = []
         if self.outcome.destroyed:
-            positions = ", ".join(f"R{row + 1}C{col + 1}" for row, col in self.outcome.destroyed)
-            effects.append(f"shield destroyed at {positions}")
+            positions = ", ".join(
+                translate(language, "position", row=row + 1, col=col + 1) for row, col in self.outcome.destroyed
+            )
+            effects.append(translate(language, "shield_destroyed", positions=positions))
         if self.outcome.hit_kings:
-            kings = " and ".join(sorted(self.outcome.hit_kings))
-            effects.append(f"{kings} king hit")
-        detail = ", ".join(effects) if effects else "no damage"
-        return (
-            f"{self.number}. {self.actor}: {self.move.mirror.value} "
-            f"at R{self.move.row + 1}C{self.move.col + 1} - {detail}"
+            if len(self.outcome.hit_kings) == 2:
+                effects.append(translate(language, "both_kings_hit"))
+            else:
+                king = next(iter(self.outcome.hit_kings))
+                effects.append(translate(language, "single_king_hit", king=translate(language, f"{king}_king")))
+        detail = ", ".join(effects) if effects else translate(language, "no_damage")
+        position = translate(language, "position", row=self.move.row + 1, col=self.move.col + 1)
+        return translate(
+            language,
+            "record",
+            number=self.number,
+            actor=self._actor_label(language),
+            mirror=self.move.mirror.value,
+            position=position,
+            detail=detail,
         )
+
+    def _actor_label(self, language: str) -> str:
+        actor = self.actor.lower()
+        if actor in {"you", "vous"}:
+            return translate(language, "you")
+        if actor in {"computer", "ordinateur"}:
+            return translate(language, "computer")
+        if actor in {"top", "haut"}:
+            return translate(language, "top_player")
+        if actor in {"bottom", "bas"}:
+            return translate(language, "bottom_player")
+        return self.actor
 
 
 class GameSession:

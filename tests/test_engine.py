@@ -4,20 +4,24 @@ from laser_war.engine import Cell, Game, Move, State
 
 
 class EngineTests(unittest.TestCase):
-    def test_initial_position_and_no_mirror_squares(self):
+    def test_initial_position_and_laser_entry_squares(self):
         game = Game()
         state = game.initial_state()
 
         self.assertEqual(state.board[0][4], Cell.TOP_KING)
         self.assertEqual(state.board[8][4], Cell.BOTTOM_KING)
-        self.assertIn((4, 0), game.no_mirror_squares)
-        self.assertIn((4, 8), game.no_mirror_squares)
+        self.assertIn((4, 0), game.laser_entry_squares)
+        self.assertIn((4, 8), game.laser_entry_squares)
 
     def test_cannot_place_in_front_of_lasers(self):
         game = Game()
         state = game.initial_state()
 
         for col in (0, 8):
+            self.assertEqual(
+                game.illegal_move_reason(state, Move(4, col, Cell.MIRROR_SLASH)),
+                "laser_entry",
+            )
             with self.assertRaises(ValueError):
                 game.apply_move(state, Move(4, col, Cell.MIRROR_SLASH))
 
@@ -47,6 +51,10 @@ class EngineTests(unittest.TestCase):
         exposed_state = State(tuple(tuple(row) for row in board), turn="bottom")
 
         for mirror in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH):
+            self.assertEqual(
+                game.illegal_move_reason(exposed_state, Move(1, 4, mirror)),
+                "king_adjacent",
+            )
             with self.assertRaisesRegex(ValueError, "adjacent to a king"):
                 game.apply_move(exposed_state, Move(1, 4, mirror))
 
@@ -141,6 +149,7 @@ class EngineTests(unittest.TestCase):
         stranding_move = Move(0, 7, Cell.MIRROR_BACKSLASH)
 
         self.assertFalse(game.is_legal_move(state, stranding_move))
+        self.assertEqual(game.illegal_move_reason(state, stranding_move), "right_laser_stranded")
         with self.assertRaisesRegex(ValueError, "right laser"):
             game.apply_move(state, stranding_move)
 

@@ -37,6 +37,7 @@ jobs:
           python -m unittest discover -v
           node web/engine.test.mjs
           node web/progress.test.mjs
+          node web/i18n.test.mjs
           node web/ultra.test.mjs
 
       - name: Build browser game

@@ -11,6 +11,7 @@ assert.equal(initial.board[8][4], Cell.BOTTOM_KING);
 assert.equal(game.legalMoves(initial).length, 130);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 0, mirror: Cell.SLASH }), false);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 8, mirror: Cell.BACKSLASH }), false);
+assert.equal(game.illegalMoveReason(initial, { row: 4, col: 0, mirror: Cell.SLASH }), "laserEntry");
 
 const next = game.resolveMove(initial, { row: 4, col: 4, mirror: Cell.SLASH }).state;
 assert.equal(next.board[4][4], Cell.SLASH);
@@ -19,6 +20,7 @@ assert.equal(next.turn, "top");
 const exposed = game.initialState();
 exposed.board[1][4] = Cell.EMPTY;
 assert.equal(game.isLegalMove(exposed, { row: 1, col: 4, mirror: Cell.SLASH }), false);
+assert.equal(game.illegalMoveReason(exposed, { row: 1, col: 4, mirror: Cell.SLASH }), "kingAdjacent");
 
 const reachability = game.reachableKingsByLaser(initial.board);
 assert.deepEqual([...reachability[0]].sort(), ["bottom", "top"]);
@@ -64,6 +66,7 @@ for (const [row, col, mirror] of strandingSetup) {
   strandingState = game.resolveMove(strandingState, { row, col, mirror }).state;
 }
 assert.equal(game.isLegalMove(strandingState, { row: 0, col: 7, mirror: "\\" }), false);
+assert.equal(game.illegalMoveReason(strandingState, { row: 0, col: 7, mirror: "\\" }), "rightLaserStranded");
 
 const tacticalGame = {
   legalChildren(state) {

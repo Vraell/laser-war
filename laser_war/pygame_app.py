@@ -12,7 +12,9 @@ import pygame
 from .ai import DIFFICULTIES, ComputerAI, SearchResult
 from .audio import AudioBank
 from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move, State
-from .paths import MATCH_LOG_DIRECTORY, PROGRESS_PATH, SAVE_PATH
+from .i18n import translate
+from .paths import MATCH_LOG_DIRECTORY, PREFERENCES_PATH, PROGRESS_PATH, SAVE_PATH
+from .preferences import Preferences
 from .progress import Progress
 from .session import GameSession, TurnRecord
 
@@ -153,6 +155,7 @@ class LaserWarGame:
         self.paused = False
         self.menu_mode = "computer"
         self.menu_difficulty = "medium"
+        self.preferences = Preferences.load(PREFERENCES_PATH)
         self.progress = Progress.load(PROGRESS_PATH)
         self.ultra_unlocked_this_match = False
         self.session = GameSession(mode=self.menu_mode, difficulty=self.menu_difficulty)
@@ -270,7 +273,7 @@ class LaserWarGame:
             try:
                 result = future.result()
             except Exception as exc:
-                self._show_toast(f"Computer error: {exc}")
+                self._show_toast(self._t("computer_error", error=exc))
                 return
             if searched_state != self.session.state:
                 if self._computer_turn():
@@ -278,14 +281,14 @@ class LaserWarGame:
                 return
             self.last_search = result
             if result.move is None:
-                self._show_toast("No legal moves. The game is a draw.")
+                self._show_toast(self._t("no_legal_moves"))
                 return
             if not self.session.game.is_legal_move(self.session.state, result.move):
-                self._show_toast("Position changed. Computer is searching again.")
+                self._show_toast(self._t("position_changed"))
                 if self._computer_turn():
                     self._start_ai()
                 return
-            record = self.session.play(result.move, "Computer")
+            record = self.session.play(result.move, "computer")
             self._begin_animation(record)
             self._autosave()
 
@@ -316,35 +319,40 @@ class LaserWarGame:
         pygame.draw.rect(shade, (3, 7, 10, 214), (0, 0, 520, DESIGN_SIZE[1]))
         self.canvas.blit(shade, (0, 0))
 
-        self._text("TACTICAL MIRROR STRATEGY", self.fonts["tiny"], color("blue"), (67, 70))
+        self._text(self._t("tagline"), self.fonts["tiny"], color("blue"), (67, 70))
         self._text("LASER WAR", self.fonts["title"], color("ink"), (62, 96))
 
         y = 220
-        self._menu_button("Play vs Computer", y, lambda: self._start_game("computer"), self.menu_mode == "computer")
-        self._menu_button("Local Two Player", y + 58, lambda: self._start_game("local"), self.menu_mode == "local")
-        self._menu_button("Continue", y + 116, self._continue_game, False, SAVE_PATH.exists())
+        self._menu_button(
+            self._t("play_computer"),
+            y,
+            lambda: self._start_game("computer"),
+            self.menu_mode == "computer",
+        )
+        self._menu_button(
+            self._t("local_two_player"),
+            y + 58,
+            lambda: self._start_game("local"),
+            self.menu_mode == "local",
+        )
+        self._menu_button(self._t("continue"), y + 116, self._continue_game, False, SAVE_PATH.exists())
 
-        self._text("DIFFICULTY", self.fonts["tiny"], color("muted"), (67, 418))
+        self._text(self._t("difficulty"), self.fonts["tiny"], color("muted"), (67, 418))
         difficulty_buttons = []
         for index, key in enumerate(DIFFICULTIES):
-            profile = DIFFICULTIES[key]
             enabled = key != "ultra" or self.progress.ultra_unlocked
             rect = pygame.Rect(62 + index * 98, 442, 92, 44)
             difficulty_buttons.append(
                 Button(
                     rect,
-                    profile.label,
+                    self._t(key),
                     lambda value=key: self._set_difficulty(value),
                     self.menu_difficulty == key,
                     enabled=enabled,
                 )
             )
         self._add_buttons(difficulty_buttons, mouse)
-        progress_note = (
-            "Ultra ready - deeper four-ply search."
-            if self.progress.ultra_unlocked
-            else "Defeat Hard to unlock Ultra."
-        )
+        progress_note = self._t("ultra_ready" if self.progress.ultra_unlocked else "ultra_locked")
         self._text(
             progress_note,
             self.fonts["tiny"],
@@ -352,32 +360,52 @@ class LaserWarGame:
             (67, 499),
         )
 
-        self._menu_button("Rules", 540, self._show_rules)
-        self._menu_button("Quit", 598, self._quit, danger=True)
-        sound = "Sound: On" if self.audio.enabled else "Sound: Off"
-        self._menu_button(sound, 676, self.audio.toggle)
+        self._menu_button(self._t("rules"), 540, self._show_rules)
+        self._menu_button(self._t("quit"), 598, self._quit, danger=True)
 
-        version = self.fonts["tiny"].render("v0.4", True, color("muted"))
+        self._text(self._t("language"), self.fonts["tiny"], color("muted"), (67, 668))
+        language_buttons = [
+            Button(
+                pygame.Rect(62, 692, 82, 42),
+                "EN",
+                lambda: self._set_language("en"),
+                self.preferences.language == "en",
+            ),
+            Button(
+                pygame.Rect(152, 692, 82, 42),
+                "FR",
+                lambda: self._set_language("fr"),
+                self.preferences.language == "fr",
+            ),
+            Button(
+                pygame.Rect(242, 692, 208, 42),
+                self._t("sound_on" if self.audio.enabled else "sound_off"),
+                self.audio.toggle,
+            ),
+        ]
+        self._add_buttons(language_buttons, mouse)
+
+        version = self.fonts["tiny"].render("v0.5", True, color("muted"))
         self.canvas.blit(version, (448, 757))
 
     def _draw_rules(self, mouse: tuple[int, int]) -> None:
         self.canvas.fill(color("background"))
         pygame.draw.rect(self.canvas, color("panel"), (0, 0, 1280, 800))
-        self._text("HOW TO PLAY", self.fonts["h1"], color("ink"), (76, 58))
+        self._text(self._t("how_to_play"), self.fonts["h1"], color("ink"), (76, 58))
         self._text(
-            "Redirect either side laser. Break the shields. Hit the opposing king.",
+            self._t("rules_intro"),
             self.fonts["body"],
             color("blue"),
             (76, 110),
         )
 
         sections = [
-            ("PLACE", "Choose / or \\ and place one mirror on any highlighted empty cell."),
-            ("FIRE", "Both lasers fire after every move. Mirrors redirect beams by 90 degrees."),
-            ("DAMAGE", "A beam destroys the first shield it touches. Mirrors cannot be destroyed."),
-            ("WIN", "Hit the opposing king without hitting your own. A simultaneous king hit is a draw."),
-            ("RESTRICTIONS", "Each king must remain reachable, and each laser must retain a route to a king."),
-            ("PATHS", "Every laser must retain a route to a king, and one must retain a route to yours."),
+            (self._t("place"), self._t("place_rule")),
+            (self._t("fire"), self._t("fire_rule")),
+            (self._t("damage"), self._t("damage_rule")),
+            (self._t("win"), self._t("win_rule")),
+            (self._t("restrictions"), self._t("restrictions_rule")),
+            (self._t("paths"), self._t("paths_rule")),
         ]
         for index, (heading, body) in enumerate(sections):
             column = index % 2
@@ -387,7 +415,7 @@ class LaserWarGame:
             self._text(heading, self.fonts["h2"], color("amber"), (x, y))
             self._wrapped_text(body, self.fonts["body"], color("ink"), pygame.Rect(x, y + 38, 500, 88))
 
-        self._add_button(Button(pygame.Rect(76, 708, 180, 48), "Back", self._show_menu), mouse)
+        self._add_button(Button(pygame.Rect(76, 708, 180, 48), self._t("back"), self._show_menu), mouse)
 
     def _draw_game(self, mouse: tuple[int, int]) -> None:
         self.canvas.fill(color("background"))
@@ -573,18 +601,18 @@ class LaserWarGame:
 
     def _draw_side_panel(self, mouse: tuple[int, int]) -> None:
         status, status_color = self._status()
-        self._text("MATCH STATUS", self.fonts["tiny"], color("muted"), (780, 36))
+        self._text(self._t("match_status"), self.fonts["tiny"], color("muted"), (780, 36))
         pygame.draw.circle(self.canvas, status_color, (789, 82), 6)
         self._text(status, self.fonts["h1"], status_color, (810, 62))
         mode = (
-            f"VS COMPUTER  |  {self.session.difficulty.upper()}"
+            self._t("versus_computer", difficulty=self._t(self.session.difficulty).upper())
             if self.session.mode == "computer"
-            else "LOCAL TWO PLAYER"
+            else self._t("local_mode")
         )
         self._text(mode, self.fonts["tiny"], color("muted"), (783, 108))
         pygame.draw.line(self.canvas, pygame.Color("#2b343b"), (780, 135), (1220, 135), 1)
 
-        self._text("MIRROR", self.fonts["tiny"], color("muted"), (783, 157))
+        self._text(self._t("mirror"), self.fonts["tiny"], color("muted"), (783, 157))
         slash = Button(
             pygame.Rect(780, 180, 214, 58),
             "/",
@@ -600,18 +628,18 @@ class LaserWarGame:
         self._add_buttons([slash, backslash], mouse)
 
         pygame.draw.line(self.canvas, pygame.Color("#2b343b"), (780, 260), (1220, 260), 1)
-        self._text("MATCH LOG", self.fonts["tiny"], color("muted"), (783, 284))
-        move_count = f"{len(self.session.history)} {'MOVE' if len(self.session.history) == 1 else 'MOVES'}"
+        self._text(self._t("match_log"), self.fonts["tiny"], color("muted"), (783, 284))
+        move_count = self._move_count(len(self.session.history))
         count_surface = self.fonts["tiny"].render(move_count, True, color("muted"))
         self.canvas.blit(count_surface, count_surface.get_rect(topright=(1220, 284)))
         if not self.session.history:
-            self._text("Awaiting the first move.", self.fonts["body"], color("muted"), (783, 320))
+            self._text(self._t("empty_log"), self.fonts["body"], color("muted"), (783, 320))
         else:
             y = 318
             for record in self.session.history[-8:]:
                 y = (
                     self._wrapped_text(
-                        record.summary,
+                        record.summary_for(self.preferences.language),
                         self.fonts["small"],
                         color("ink"),
                         pygame.Rect(783, y, 438, 45),
@@ -621,29 +649,39 @@ class LaserWarGame:
 
         if self.ai_future:
             seconds = monotonic() - self.ai_started
-            label = "Ultra depth search" if self.session.difficulty == "ultra" else "Computer searching"
+            label = self._t("ultra_search" if self.session.difficulty == "ultra" else "computer_search")
             pygame.draw.circle(self.canvas, color("blue"), (789, 710), 4)
-            self._text(f"{label}  |  {seconds:.1f}s", self.fonts["small"], color("blue"), (803, 699))
+            self._text(
+                self._t("search_detail", label=label, seconds=f"{seconds:.1f}"),
+                self.fonts["small"],
+                color("blue"),
+                (803, 699),
+            )
         elif self.last_search:
             result = self.last_search
-            detail = f"AI depth {result.depth} | {result.nodes:,} nodes | {result.elapsed:.2f}s"
+            detail = self._t(
+                "ai_detail",
+                depth=result.depth,
+                nodes=f"{result.nodes:,}",
+                seconds=f"{result.elapsed:.2f}",
+            )
             self._text(detail, self.fonts["tiny"], color("muted"), (783, 704))
 
         footer_buttons = [
-            Button(pygame.Rect(780, 742, 172, 42), "New Match", self._restart),
-            Button(pygame.Rect(962, 742, 172, 42), "Main Menu", self._return_to_menu),
-            Button(pygame.Rect(1144, 742, 76, 42), "Sound", self.audio.toggle, self.audio.enabled),
+            Button(pygame.Rect(780, 742, 172, 42), self._t("new_match"), self._restart),
+            Button(pygame.Rect(962, 742, 172, 42), self._t("main_menu"), self._return_to_menu),
+            Button(pygame.Rect(1144, 742, 76, 42), self._t("sound"), self.audio.toggle, self.audio.enabled),
         ]
         self._add_buttons(footer_buttons, mouse)
 
     def _draw_pause(self, mouse: tuple[int, int]) -> None:
         self._draw_overlay()
         self.buttons = []
-        self._text("PAUSED", self.fonts["h1"], color("ink"), (548, 230))
+        self._text(self._t("paused"), self.fonts["h1"], color("ink"), (548, 230))
         buttons = [
-            Button(pygame.Rect(500, 302, 280, 50), "Resume", self._toggle_pause),
-            Button(pygame.Rect(500, 366, 280, 50), "Restart Match", self._restart),
-            Button(pygame.Rect(500, 430, 280, 50), "Main Menu", self._return_to_menu),
+            Button(pygame.Rect(500, 302, 280, 50), self._t("resume"), self._toggle_pause),
+            Button(pygame.Rect(500, 366, 280, 50), self._t("restart"), self._restart),
+            Button(pygame.Rect(500, 430, 280, 50), self._t("main_menu"), self._return_to_menu),
         ]
         self._add_buttons(buttons, mouse)
 
@@ -653,25 +691,29 @@ class LaserWarGame:
             self._draw_beam_animation(self.final_animation)
         self.buttons = []
         if self.session.state.draw:
-            heading, accent = "DRAW", color("ink")
+            heading, accent = self._t("draw"), color("ink")
         else:
             winner = self.session.state.winner or ""
             if self.session.mode == "computer":
-                heading = "VICTORY" if winner == "bottom" else "DEFEAT"
+                heading = self._t("victory" if winner == "bottom" else "defeat")
             else:
-                heading = f"{winner.upper()} WINS"
+                heading = self._t("side_wins", side=self._t(winner)).upper()
             accent = color("amber" if winner == "bottom" else "blue")
         text = self.fonts["title"].render(heading, True, accent)
         self.canvas.blit(text, text.get_rect(center=(640, 258)))
         if self.ultra_unlocked_this_match:
-            detail = "ULTRA DIFFICULTY UNLOCKED"
+            detail = self._t("ultra_unlocked")
         else:
-            detail = f"{self.session.difficulty.upper()}  |  {len(self.session.history)} MOVES"
+            detail = self._t(
+                "result_detail",
+                difficulty=self._t(self.session.difficulty).upper(),
+                count=self._move_count(len(self.session.history)),
+            )
         detail_surface = self.fonts["small"].render(detail, True, color("ink"))
         self.canvas.blit(detail_surface, detail_surface.get_rect(center=(640, 324)))
         buttons = [
-            Button(pygame.Rect(500, 374, 280, 50), "Play Again", self._restart),
-            Button(pygame.Rect(500, 438, 280, 50), "Main Menu", self._return_to_menu),
+            Button(pygame.Rect(500, 374, 280, 50), self._t("play_again"), self._restart),
+            Button(pygame.Rect(500, 438, 280, 50), self._t("main_menu"), self._return_to_menu),
         ]
         self._add_buttons(buttons, mouse)
 
@@ -683,7 +725,8 @@ class LaserWarGame:
     def _draw_toast(self) -> None:
         text = self.fonts["body"].render(self.toast, True, pygame.Color("white"))
         rect = text.get_rect(center=(640, 752)).inflate(32, 20)
-        pygame.draw.rect(self.canvas, pygame.Color("#752f36"), rect, border_radius=6)
+        pygame.draw.rect(self.canvas, color("panel_light"), rect, border_radius=6)
+        pygame.draw.rect(self.canvas, pygame.Color("#a97b2b"), rect, 1, border_radius=6)
         self.canvas.blit(text, text.get_rect(center=rect.center))
 
     def _update_particles(self, dt: float) -> None:
@@ -717,9 +760,12 @@ class LaserWarGame:
             return
         move = Move(*cell, self.selected_mirror)
         if move not in self.legal_moves:
-            self._show_toast("That mirror placement is not legal.")
+            reason = self.session.game.illegal_move_reason(self.session.state, move)
+            key = f"illegal_{reason}" if reason else "illegal_move"
+            message = self._t(key)
+            self._show_toast(self._t("illegal_move") if message == key else message)
             return
-        actor = "You" if self.session.mode == "computer" else self.session.state.turn.title()
+        actor = "you" if self.session.mode == "computer" else self.session.state.turn
         record = self.session.play(move, actor)
         self._begin_animation(record)
         self._autosave()
@@ -763,7 +809,7 @@ class LaserWarGame:
         try:
             self.session = GameSession.load(SAVE_PATH)
         except (OSError, ValueError, KeyError) as exc:
-            self._show_toast(f"Could not load save: {exc}")
+            self._show_toast(self._t("load_failed", error=exc))
             return
         self.menu_mode = self.session.mode
         self.menu_difficulty = self.session.difficulty
@@ -772,7 +818,7 @@ class LaserWarGame:
             try:
                 self.progress.save(PROGRESS_PATH)
             except OSError:
-                self._show_toast("Progress could not be saved.")
+                self._show_toast(self._t("progress_failed"))
         self._record_progress()
         self.scene = "game"
         self.paused = False
@@ -829,13 +875,13 @@ class LaserWarGame:
             self.session.save(SAVE_PATH)
             self.session.save_match_log(MATCH_LOG_DIRECTORY)
         except OSError:
-            self._show_toast("Autosave is unavailable.")
+            self._show_toast(self._t("autosave_failed"))
 
     def _archive_match(self, status: str) -> None:
         try:
             self.session.save_match_log(MATCH_LOG_DIRECTORY, status)
         except OSError:
-            self._show_toast("Match log storage is unavailable.")
+            self._show_toast(self._t("log_storage_failed"))
 
     def _refresh_legal_moves(self) -> None:
         self.legal_moves = set(self.session.game.legal_moves(self.session.state))
@@ -855,14 +901,20 @@ class LaserWarGame:
     def _status(self) -> tuple[str, pygame.Color]:
         state = self.session.state
         if state.winner:
-            return f"{state.winner.title()} wins", color("amber" if state.winner == "bottom" else "blue")
+            return (
+                self._t("side_wins", side=self._t(state.winner)),
+                color("amber" if state.winner == "bottom" else "blue"),
+            )
         if state.draw:
-            return "Draw", color("ink")
+            return self._t("draw"), color("ink")
         if self.ai_future:
-            return "Computer thinking", color("blue")
+            return self._t("computer_thinking"), color("blue")
         if self.session.mode == "computer":
-            return "Your turn", color("amber")
-        return f"{state.turn.title()} to move", color("amber" if state.turn == "bottom" else "blue")
+            return self._t("your_turn"), color("amber")
+        return (
+            self._t("side_to_move", side=self._t(state.turn)),
+            color("amber" if state.turn == "bottom" else "blue"),
+        )
 
     def _cell_at(self, position: tuple[int, int]) -> tuple[int, int] | None:
         if not BOARD_RECT.collidepoint(position):
@@ -886,9 +938,16 @@ class LaserWarGame:
 
     def _set_difficulty(self, difficulty: str) -> None:
         if difficulty == "ultra" and not self.progress.ultra_unlocked:
-            self._show_toast("Defeat Hard to unlock Ultra.")
+            self._show_toast(self._t("unlock_instruction"))
             return
         self.menu_difficulty = difficulty
+
+    def _set_language(self, language: str) -> None:
+        self.preferences.set_language(language)
+        try:
+            self.preferences.save(PREFERENCES_PATH)
+        except OSError:
+            self._show_toast(self._t("progress_failed"))
 
     def _record_progress(self) -> None:
         progress = getattr(self, "progress", None)
@@ -905,7 +964,7 @@ class LaserWarGame:
         try:
             progress.save(PROGRESS_PATH)
         except OSError:
-            self._show_toast("Progress could not be saved.")
+            self._show_toast(self._t("progress_failed"))
 
     def _show_rules(self) -> None:
         self.scene = "rules"
@@ -915,6 +974,14 @@ class LaserWarGame:
 
     def _toggle_pause(self) -> None:
         self.paused = not self.paused
+
+    def _t(self, key: str, **values: object) -> str:
+        preferences = getattr(self, "preferences", None)
+        language = preferences.language if preferences else "en"
+        return translate(language, key, **values)
+
+    def _move_count(self, count: int) -> str:
+        return f"{count} {self._t('move' if count == 1 else 'moves')}"
 
     def _show_toast(self, message: str) -> None:
         self.toast = message

@@ -6,6 +6,7 @@ import {
   legacyMatchId,
 } from "./save.js";
 import { loadProgress, recordResult, saveProgress } from "./progress.js";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js";
 
 const SAVE_KEY = "laser-war.web.v1";
 const game = new Game();
@@ -39,6 +40,7 @@ const elements = {
 
 let session = createSession();
 let progress = loadProgress(localStorage);
+let language = loadLanguage(localStorage);
 let selectedMirror = Cell.SLASH;
 let legalMoves = [];
 let inputLocked = false;
@@ -49,6 +51,18 @@ let aiWorker = null;
 let aiRequestId = 0;
 let aiTimer = 0;
 let ultraUnlockedThisMatch = false;
+
+function t(key, values = {}) {
+  return translate(language, key, values);
+}
+
+function difficultyName(difficulty) {
+  return t(difficulty);
+}
+
+function moveCount(count) {
+  return `${count} ${t(count === 1 ? "move" : "moves")}`;
+}
 
 function createSession(
   mode = "computer",
@@ -102,7 +116,7 @@ function playMove(move, actor) {
   try {
     outcome = game.resolveMove(session.state, move);
   } catch (error) {
-    showToast(error.message);
+    showToast(t("illegalMove"));
     return;
   }
 
@@ -144,21 +158,24 @@ function beginComputerTurn() {
   if (elements.gameScreen.hidden || !computerTurn() || inputLocked) return;
   cancelComputerTurn();
   inputLocked = true;
-  elements.status.textContent = "Computer thinking";
+  elements.status.textContent = t("computerThinking");
   elements.statusLight.style.background = "var(--cyan)";
   elements.statusLight.style.color = "var(--cyan)";
   elements.aiDetail.classList.add("thinking");
   const started = performance.now();
   const difficulty = session.difficulty;
   elements.aiDetail.textContent = difficulty === "ultra"
-    ? "Ultra · mapping four-ply threats"
-    : `${title(difficulty)} · analyzing legal paths`;
+    ? t("ultraSearch")
+    : t("standardSearch", { difficulty: difficultyName(difficulty) });
   renderBoard();
   aiTimer = window.setInterval(() => {
     const elapsed = (performance.now() - started) / 1000;
     elements.aiDetail.textContent = difficulty === "ultra"
-      ? `Ultra · depth search · ${elapsed.toFixed(1)}s`
-      : `${title(difficulty)} · analyzing · ${elapsed.toFixed(1)}s`;
+      ? t("ultraSearching", { seconds: elapsed.toFixed(1) })
+      : t("standardSearching", {
+        difficulty: difficultyName(difficulty),
+        seconds: elapsed.toFixed(1),
+      });
   }, 250);
 
   const requestId = ++aiRequestId;
@@ -172,7 +189,7 @@ function beginComputerTurn() {
     cancelComputerTurn();
     inputLocked = false;
     render();
-    showToast("Computer search failed. Start a new match to continue.");
+    showToast(t("computerSearchFailed"));
   });
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
 }
@@ -189,9 +206,12 @@ function finishComputerTurn(result) {
     return;
   }
   elements.aiDetail.classList.remove("thinking");
-  elements.aiDetail.textContent =
-    `AI · depth ${result.depth} · ${result.nodes.toLocaleString()} positions · ${formatElapsed(result.elapsed)}`;
-  playMove(result.move, "Computer");
+  elements.aiDetail.textContent = t("aiResult", {
+    depth: result.depth,
+    nodes: result.nodes.toLocaleString(language),
+    elapsed: formatElapsed(result.elapsed),
+  });
+  playMove(result.move, "computer");
 }
 
 function cancelComputerTurn(invalidate = true) {
@@ -236,17 +256,26 @@ function renderBoard() {
       const value = session.state.board[row][col];
       const move = { row, col, mirror: selectedMirror };
       const moveIsLegal = legal.has(moveKey(move));
+      const canAct = humanTurn() && !inputLocked && !paused;
+      const explainable = canAct && value === Cell.EMPTY && !moveIsLegal;
       cell.className = "cell";
       cell.dataset.row = String(row);
       cell.dataset.col = String(col);
       cell.setAttribute("role", "gridcell");
-      cell.setAttribute("aria-label", cellLabel(row, col, value, moveIsLegal));
+      cell.setAttribute("aria-label", cellLabel(row, col, value, moveIsLegal, explainable));
       if (forbidden.has(`${row},${col}`)) cell.classList.add("blocked");
-      if (moveIsLegal && humanTurn() && !inputLocked && !paused) cell.classList.add("legal");
-      cell.disabled = !moveIsLegal || !humanTurn() || inputLocked || paused;
-      cell.addEventListener("click", () => playMove(move, session.mode === "computer" ? "You" : title(session.state.turn)));
+      if (moveIsLegal && canAct) cell.classList.add("legal");
+      if (explainable) cell.classList.add("explainable");
+      cell.disabled = !canAct || value !== Cell.EMPTY;
+      cell.addEventListener("click", () => {
+        if (moveIsLegal) {
+          playMove(move, session.mode === "computer" ? "you" : session.state.turn);
+        } else {
+          explainIllegalMove(move);
+        }
+      });
       cell.addEventListener("mouseenter", () => {
-        if (!cell.disabled) {
+        if (moveIsLegal && !cell.disabled) {
           cell.classList.add("preview");
           cell.style.setProperty("--mirror-angle", selectedMirror === Cell.SLASH ? "45deg" : "-45deg");
         }
@@ -274,36 +303,44 @@ function pieceFor(value) {
   return piece;
 }
 
-function cellLabel(row, col, value, moveIsLegal) {
+function cellLabel(row, col, value, moveIsLegal, explainable = false) {
   const names = {
-    [Cell.EMPTY]: "empty",
-    [Cell.SLASH]: "slash mirror",
-    [Cell.BACKSLASH]: "backslash mirror",
-    [Cell.SHIELD]: "shield",
-    [Cell.TOP_KING]: "top king",
-    [Cell.BOTTOM_KING]: "bottom king",
+    [Cell.EMPTY]: t("empty"),
+    [Cell.SLASH]: t("slashMirror"),
+    [Cell.BACKSLASH]: t("backslashMirror"),
+    [Cell.SHIELD]: t("shield"),
+    [Cell.TOP_KING]: t("topKing"),
+    [Cell.BOTTOM_KING]: t("bottomKing"),
   };
-  const action = moveIsLegal ? `, place ${selectedMirror === Cell.SLASH ? "slash" : "backslash"} mirror` : "";
-  return `Row ${row + 1}, column ${col + 1}, ${names[value]}${action}`;
+  const mirror = selectedMirror === Cell.SLASH ? t("slashMirror") : t("backslashMirror");
+  let action = "";
+  if (moveIsLegal) action = t("placeAction", { mirror });
+  else if (explainable) action = t("explainAction");
+  return t("cellLabel", { row: row + 1, col: col + 1, cell: names[value], action });
+}
+
+function explainIllegalMove(move) {
+  const reason = game.illegalMoveReason(session.state, move) || "illegalMove";
+  showToast(t(reason));
 }
 
 function renderStatus() {
   let text = "";
   let color = "var(--amber)";
   if (session.state.winner) {
-    text = `${title(session.state.winner)} wins`;
+    text = t("sideWins", { side: t(session.state.winner) });
     color = session.state.winner === "bottom" ? "var(--amber)" : "var(--cyan)";
   } else if (session.state.draw) {
-    text = "Draw";
+    text = t("draw");
     color = "var(--muted)";
   } else if (inputLocked && computerTurn()) {
-    text = "Computer thinking";
+    text = t("computerThinking");
     color = "var(--cyan)";
   } else if (session.mode === "computer") {
-    text = session.state.turn === "bottom" ? "Your turn" : "Computer turn";
+    text = session.state.turn === "bottom" ? t("yourTurn") : t("computerTurn");
     color = session.state.turn === "bottom" ? "var(--amber)" : "var(--cyan)";
   } else {
-    text = `${title(session.state.turn)} to move`;
+    text = t("sideToMove", { side: t(session.state.turn) });
     color = session.state.turn === "bottom" ? "var(--amber)" : "var(--cyan)";
   }
   elements.status.textContent = text;
@@ -312,13 +349,13 @@ function renderStatus() {
 }
 
 function renderLog() {
-  elements.moveCount.textContent = `${session.history.length} ${session.history.length === 1 ? "move" : "moves"}`;
+  elements.moveCount.textContent = moveCount(session.history.length);
   elements.copyLog.disabled = session.history.length === 0;
   elements.log.replaceChildren();
   if (!session.history.length) {
     const empty = document.createElement("li");
     empty.className = "empty-log";
-    empty.textContent = "Awaiting the first move.";
+    empty.textContent = t("emptyLog");
     elements.log.append(empty);
     return;
   }
@@ -333,10 +370,37 @@ function renderLog() {
 function recordSummary(record) {
   const effects = [];
   if (record.outcome.destroyed.length) {
-    effects.push(`shield at ${record.outcome.destroyed.map(([row, col]) => `R${row + 1}C${col + 1}`).join(", ")}`);
+    effects.push(t("shieldAt", {
+      positions: record.outcome.destroyed.map(([row, col]) => positionLabel(row, col)).join(", "),
+    }));
   }
-  if (record.outcome.hitKings.size) effects.push(`${[...record.outcome.hitKings].sort().join(" and ")} king hit`);
-  return `${record.actor}: ${record.move.mirror} at R${record.move.row + 1}C${record.move.col + 1} · ${effects.join(", ") || "no damage"}`;
+  if (record.outcome.hitKings.size) {
+    if (record.outcome.hitKings.size === 2) {
+      effects.push(t("bothKingsHit"));
+    } else {
+      const [king] = record.outcome.hitKings;
+      effects.push(t("singleKingHit", { king: t(`${king}King`) }));
+    }
+  }
+  return t("record", {
+    actor: actorLabel(record.actor),
+    mirror: record.move.mirror,
+    position: positionLabel(record.move.row, record.move.col),
+    effects: effects.join(", ") || t("noDamage"),
+  });
+}
+
+function positionLabel(row, col) {
+  return t("rowColumn", { row: row + 1, col: col + 1 });
+}
+
+function actorLabel(actor) {
+  const normalized = String(actor).toLowerCase();
+  if (["you", "vous"].includes(normalized)) return t("you");
+  if (["computer", "ordinateur"].includes(normalized)) return t("computer");
+  if (["top", "haut", "joueur du haut"].includes(normalized)) return t("topPlayer");
+  if (["bottom", "bas", "joueur du bas"].includes(normalized)) return t("bottomPlayer");
+  return actor;
 }
 
 function renderBeams(beams) {
@@ -360,7 +424,7 @@ function clearBeams() {
   elements.beams.replaceChildren();
 }
 
-function showResult() {
+function showResult(playSound = true) {
   if (
     !ultraUnlockedThisMatch
     && recordResult(progress, {
@@ -374,23 +438,27 @@ function showResult() {
     updateProgressUI();
   }
   elements.resultOverlay.hidden = false;
+  elements.gameScreen.classList.add("match-complete");
   if (session.state.draw) {
-    elements.resultTitle.textContent = "DRAW";
+    elements.resultTitle.textContent = t("draw").toUpperCase();
     elements.resultTitle.style.color = "var(--ink)";
-    elements.resultDetail.textContent = `${session.history.length} moves · neither king survives`;
+    elements.resultDetail.textContent = t("drawDetail", { count: moveCount(session.history.length) });
   } else if (session.mode === "computer") {
     const victory = session.state.winner === "bottom";
-    elements.resultTitle.textContent = victory ? "VICTORY" : "DEFEAT";
+    elements.resultTitle.textContent = victory ? t("victory") : t("defeat");
     elements.resultTitle.style.color = victory ? "var(--amber)" : "var(--cyan)";
     elements.resultDetail.textContent = ultraUnlockedThisMatch
-      ? "Ultra difficulty unlocked"
-      : `${title(session.difficulty)} · ${session.history.length} moves`;
+      ? t("ultraUnlocked")
+      : t("resultDetail", {
+        difficulty: difficultyName(session.difficulty),
+        count: moveCount(session.history.length),
+      });
   } else {
-    elements.resultTitle.textContent = `${session.state.winner.toUpperCase()} WINS`;
+    elements.resultTitle.textContent = t("sideWins", { side: t(session.state.winner) }).toUpperCase();
     elements.resultTitle.style.color = session.state.winner === "bottom" ? "var(--amber)" : "var(--cyan)";
-    elements.resultDetail.textContent = `${session.history.length} moves`;
+    elements.resultDetail.textContent = moveCount(session.history.length);
   }
-  audio.play("victory");
+  if (playSound) audio.play("victory");
 }
 
 function undo() {
@@ -401,6 +469,7 @@ function undo() {
   session.state = cloneState(record.before);
   lastOutcome = null;
   elements.resultOverlay.hidden = true;
+  elements.gameScreen.classList.remove("match-complete");
   clearBeams();
   refreshLegalMoves();
   render();
@@ -416,7 +485,7 @@ function redo() {
   try {
     outcome = game.resolveMove(session.state, old.move);
   } catch {
-    showToast("That move can no longer be redone.");
+    showToast(t("redoFailed"));
     session.redo.push(old);
     return;
   }
@@ -452,6 +521,7 @@ function returnToMenu() {
   paused = false;
   elements.pauseOverlay.hidden = true;
   elements.resultOverlay.hidden = true;
+  elements.gameScreen.classList.remove("match-complete");
   elements.gameScreen.hidden = true;
   elements.menu.hidden = false;
   elements.continueButton.disabled = !hasSave();
@@ -469,7 +539,7 @@ function saveGame() {
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(session)));
     elements.continueButton.disabled = false;
   } catch {
-    showToast("Match storage is full or unavailable.");
+    showToast(t("storageFailed"));
   }
 }
 
@@ -522,7 +592,7 @@ function continueGame() {
     localStorage.removeItem(SAVE_KEY);
     elements.continueButton.disabled = true;
     returnToMenu();
-    showToast(`Could not load save: ${error.message}`);
+    showToast(t("loadFailed", { error: error.message }));
     return;
   }
   if (session.state.winner || session.state.draw) {
@@ -541,8 +611,11 @@ function startGameView() {
   elements.gameScreen.hidden = false;
   elements.pauseOverlay.hidden = true;
   elements.resultOverlay.hidden = true;
+  elements.gameScreen.classList.remove("match-complete");
   elements.modeLabel.textContent =
-    session.mode === "computer" ? `VS COMPUTER · ${session.difficulty.toUpperCase()}` : "LOCAL TWO PLAYER";
+    session.mode === "computer"
+      ? t("versusComputer", { difficulty: difficultyName(session.difficulty).toUpperCase() })
+      : t("localMode");
   elements.aiDetail.textContent = "";
   refreshLegalMoves();
   clearBeams();
@@ -551,10 +624,8 @@ function startGameView() {
 
 function updateProgressUI() {
   elements.ultraDifficulty.disabled = !progress.ultraUnlocked;
-  elements.ultraState.textContent = progress.ultraUnlocked ? "READY" : "LOCKED";
-  elements.progressNote.textContent = progress.ultraUnlocked
-    ? "Ultra is ready. Expect a longer, deeper search."
-    : "Defeat Hard to unlock Ultra.";
+  elements.ultraState.textContent = progress.ultraUnlocked ? t("ready") : t("locked");
+  elements.progressNote.textContent = progress.ultraUnlocked ? t("ultraReadyNote") : t("ultraLockedNote");
   elements.progressNote.classList.toggle("unlocked", progress.ultraUnlocked);
 }
 
@@ -572,23 +643,23 @@ function migrateStoredSave() {
 function currentLogText() {
   const count = session.history.length;
   return [
-    "MATCH LOG",
+    t("matchLog"),
     "",
-    `${count} ${count === 1 ? "move" : "moves"}`,
+    moveCount(count),
     ...session.history.map(recordSummary),
   ].join("\n");
 }
 
 async function copyMatchLog() {
   if (!session.history.length) {
-    showToast("No moves to copy yet.");
+    showToast(t("noMovesToCopy"));
     return;
   }
   try {
     await navigator.clipboard.writeText(currentLogText());
-    showToast("Match log copied.");
+    showToast(t("logCopied"));
   } catch {
-    showToast("Could not copy the match log.");
+    showToast(t("copyFailed"));
   }
 }
 
@@ -606,8 +677,33 @@ function selectMirror(mirror) {
   renderBoard();
 }
 
-function title(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+function applyLanguage(nextLanguage, persist = true) {
+  language = nextLanguage === "fr" ? "fr" : "en";
+  if (persist) saveLanguage(localStorage, language);
+  document.documentElement.lang = language;
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach((element) => {
+    element.setAttribute("aria-label", t(element.dataset.i18nAria));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((element) => {
+    element.setAttribute("title", t(element.dataset.i18nTitle));
+  });
+  document.querySelectorAll("[data-language]").forEach((button) => {
+    const selected = button.dataset.language === language;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  updateProgressUI();
+  if (!elements.gameScreen.hidden) {
+    elements.modeLabel.textContent = session.mode === "computer"
+      ? t("versusComputer", { difficulty: difficultyName(session.difficulty).toUpperCase() })
+      : t("localMode");
+    render();
+    if (session.state.winner || session.state.draw) showResult(false);
+  }
+  audio.updateLabel();
 }
 
 class Audio {
@@ -619,7 +715,13 @@ class Audio {
   toggle() {
     this.enabled = !this.enabled;
     elements.sound.textContent = this.enabled ? "♪" : "×";
-    elements.sound.setAttribute("aria-label", this.enabled ? "Mute sound" : "Enable sound");
+    this.updateLabel();
+  }
+
+  updateLabel() {
+    const label = this.enabled ? t("muteSound") : t("enableSound");
+    elements.sound.setAttribute("aria-label", label);
+    elements.sound.setAttribute("title", label);
   }
 
   play(name) {
@@ -673,6 +775,9 @@ document.querySelector("#result-menu").addEventListener("click", returnToMenu);
 document.querySelector("#show-rules").addEventListener("click", () => elements.rules.showModal());
 elements.copyLog.addEventListener("click", copyMatchLog);
 elements.sound.addEventListener("click", () => audio.toggle());
+document.querySelectorAll("[data-language]").forEach((button) => {
+  button.addEventListener("click", () => applyLanguage(button.dataset.language));
+});
 
 document.addEventListener("keydown", (event) => {
   if (elements.rules.open) return;
@@ -685,7 +790,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 migrateStoredSave();
-updateProgressUI();
+applyLanguage(language, false);
 elements.continueButton.disabled = !hasSave();
 window.__laserWar = {
   game,

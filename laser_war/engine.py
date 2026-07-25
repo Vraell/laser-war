@@ -8,7 +8,7 @@ from math import inf
 
 BOARD_SIZE = 9
 MIDDLE_ROW = 4
-NO_MIRROR_SQUARES = frozenset({(MIDDLE_ROW, 0), (MIDDLE_ROW, BOARD_SIZE - 1)})
+LASER_ENTRY_SQUARES = frozenset({(MIDDLE_ROW, 0), (MIDDLE_ROW, BOARD_SIZE - 1)})
 
 DIRS = {
     "N": (-1, 0),
@@ -78,13 +78,19 @@ class MoveOutcome:
     hit_kings: frozenset[str]
 
 
+class IllegalMoveError(ValueError):
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 class Game:
     def __init__(self, size: int = BOARD_SIZE):
         if size != 9:
             raise ValueError("This reconstruction currently supports only the 9x9 board.")
         self.size = size
         self.sources = ((MIDDLE_ROW, -1, "E"), (MIDDLE_ROW, size, "W"))
-        self.no_mirror_squares = NO_MIRROR_SQUARES
+        self.laser_entry_squares = LASER_ENTRY_SQUARES
         self._reachability_cache: OrderedDict[
             tuple[tuple[Cell, ...], ...],
             tuple[frozenset[str], frozenset[str]],
@@ -123,22 +129,31 @@ class Game:
             return False
         return True
 
+    def illegal_move_reason(self, state: State, move: Move) -> str | None:
+        try:
+            self.resolve_move(state, move, check_no_legal_moves=False)
+        except IllegalMoveError as error:
+            return error.reason
+        except ValueError:
+            return "illegal_move"
+        return None
+
     def apply_move(self, state: State, move: Move) -> State:
         return self.resolve_move(state, move).state
 
     def resolve_move(self, state: State, move: Move, check_no_legal_moves: bool = True) -> MoveOutcome:
         if state.winner or state.draw:
-            raise ValueError("The game is already over.")
+            raise IllegalMoveError("game_over", "The game is already over.")
         if move.mirror not in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH):
-            raise ValueError("A move must place either '/' or '\\'.")
+            raise IllegalMoveError("invalid_mirror", "A move must place either '/' or '\\'.")
         if not self._in_bounds(move.row, move.col):
-            raise ValueError("Move is outside the board.")
+            raise IllegalMoveError("outside_board", "Move is outside the board.")
         if (move.row, move.col) in self.mirror_forbidden_squares(state.board):
-            if (move.row, move.col) in self.no_mirror_squares:
-                raise ValueError("No mirror can be placed directly in front of a laser.")
-            raise ValueError("No mirror can be placed adjacent to a king.")
+            if (move.row, move.col) in self.laser_entry_squares:
+                raise IllegalMoveError("laser_entry", "No mirror can be placed directly in front of a laser.")
+            raise IllegalMoveError("king_adjacent", "No mirror can be placed adjacent to a king.")
         if state.board[move.row][move.col] != Cell.EMPTY:
-            raise ValueError("Move square is not empty.")
+            raise IllegalMoveError("occupied", "Move square is not empty.")
 
         board = [list(row) for row in state.board]
         board[move.row][move.col] = move.mirror
@@ -165,12 +180,21 @@ class Game:
         else:
             reachable = self.reachable_kings_by_laser(next_board)
             if not any(own in kings for kings in reachable):
-                raise ValueError("Illegal move: it fully blocks all possible laser paths to your king.")
+                raise IllegalMoveError(
+                    "own_king_unreachable",
+                    "Illegal move: it fully blocks all possible laser paths to your king.",
+                )
             if not any(opponent in kings for kings in reachable):
-                raise ValueError("Illegal move: it fully blocks all possible laser paths to the opponent's king.")
+                raise IllegalMoveError(
+                    "opponent_king_unreachable",
+                    "Illegal move: it fully blocks all possible laser paths to the opponent's king.",
+                )
             for label, kings in zip(("left", "right"), reachable, strict=True):
                 if not kings:
-                    raise ValueError(f"Illegal move: it leaves the {label} laser with no possible path to either king.")
+                    raise IllegalMoveError(
+                        f"{label}_laser_stranded",
+                        f"Illegal move: it leaves the {label} laser with no possible path to either king.",
+                    )
             if check_no_legal_moves:
                 provisional = State(next_board, turn=opponent)
                 next_state = State(next_board, turn=opponent, draw=not self.has_any_legal_move(provisional))
@@ -217,7 +241,7 @@ class Game:
         return frozenset(squares)
 
     def mirror_forbidden_squares(self, board: tuple[tuple[Cell, ...], ...]) -> frozenset[tuple[int, int]]:
-        return self.no_mirror_squares | self.king_adjacent_squares(board)
+        return self.laser_entry_squares | self.king_adjacent_squares(board)
 
     def evaluate(self, state: State) -> float:
         if state.draw:

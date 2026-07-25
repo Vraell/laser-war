@@ -21,9 +21,11 @@ The game includes:
 
 - computer opponents with Easy, Medium, Hard, and unlockable Ultra search profiles;
 - local two-player mode;
+- a persistent English/French interface;
 - scalable 60 FPS rendering;
 - animated simultaneous lasers, impacts, particles, and synthesized sound;
-- legal-move highlighting and forbidden-square markings;
+- legal-move highlighting, forbidden-square markings, and reason-specific move feedback;
+- a clearly retained final laser volley after a win or draw;
 - symmetric anti-fortress rules that keep both kings and both lasers viable;
 - pause, undo, redo, restart, autosave, and continue;
 - a validated recent-match history with damage events;
