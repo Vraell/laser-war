@@ -12,13 +12,13 @@ import pygame
 from .ai import DIFFICULTIES, ComputerAI, SearchResult
 from .audio import AudioBank
 from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move, State
+from .paths import SAVE_PATH
 from .session import GameSession, TurnRecord
 
 DESIGN_SIZE = (1280, 800)
 FPS = 60
 BOARD_RECT = pygame.Rect(76, 98, 612, 612)
 CELL_SIZE = BOARD_RECT.width // BOARD_SIZE
-SAVE_PATH = Path.home() / "Library" / "Application Support" / "Laser War" / "autosave.json"
 
 COLORS = {
     "ink": "#e7edf1",

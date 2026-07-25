@@ -2,6 +2,11 @@
 
 A polished desktop reconstruction of the mirror-and-laser strategy game.
 
+## Play Online
+
+Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). No installation or Python runtime
+is required, and match progress is saved in that browser's local storage.
+
 ## Play
 
 Requires Python 3.10 or newer.
@@ -49,10 +54,35 @@ coverage run -m unittest
 coverage report
 ```
 
+Build the native browser version locally:
+
+```bash
+./scripts/build_web.sh
+```
+
+The static site is written to `build/web`. It is a small HTML, CSS, and JavaScript client that implements the
+same board, laser, damage, king-safety, and anti-fortress rules as the Python engine without a WebAssembly
+startup delay.
+
 The rules engine is independent of Pygame. `session.py` owns reversible match history and saves, `ai.py` owns
 time-bounded search, and `pygame_app.py` owns presentation and input.
 
 See `docs/LASER_WAR_RULES.md` for the reconstructed rules.
+
+## Windows
+
+Download the latest installer from the GitHub Releases page. It installs for the current user, requires no
+Python installation or administrator access, and adds Start menu and optional desktop shortcuts.
+
+The portable ZIP contains the same game without an installer: extract the full folder and run `Laser War.exe`.
+
+To build both packages on Windows:
+
+```powershell
+./scripts/build_windows.ps1
+```
+
+This requires Python 3.11 and Inno Setup 6. Tagged GitHub releases build and publish both packages automatically.
 
 ## Optional macOS App
 

@@ -4,7 +4,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 
 project_root = Path.cwd()
-icon_path = project_root / "laser_war" / "assets" / "app-icon.png"
+icon_path = project_root / "laser_war" / "assets" / "app-icon.ico"
 
 analysis = Analysis(
     ["laser_war/launcher.py"],
@@ -30,12 +30,8 @@ executable = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
     icon=str(icon_path),
 )
 
@@ -44,18 +40,6 @@ collection = COLLECT(
     analysis.binaries,
     analysis.datas,
     strip=False,
-    upx=True,
+    upx=False,
     name="Laser War",
-)
-
-application = BUNDLE(
-    collection,
-    name="Laser War.app",
-    icon=str(icon_path),
-    bundle_identifier="com.laserwar.game",
-    info_plist={
-        "CFBundleDisplayName": "Laser War",
-        "CFBundleShortVersionString": "0.3.0",
-        "NSHighResolutionCapable": True,
-    },
 )

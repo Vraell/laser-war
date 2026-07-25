@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0e1215">
+    <meta name="description" content="Laser War, a tactical mirror strategy game.">
+    <title>Laser War</title>
+    <link rel="icon" href="assets/app-icon.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <section class="menu-screen" id="menu-screen">
+      <div class="menu-shade"></div>
+      <div class="menu-content">
+        <p class="kicker">TACTICAL MIRROR STRATEGY</p>
+        <h1>LASER WAR</h1>
+        <div class="menu-actions">
+          <button class="primary" id="start-computer">Play vs Computer</button>
+          <button id="start-local">Local Two Player</button>
+          <button id="continue-game" disabled>Continue</button>
+        </div>
+        <fieldset class="difficulty">
+          <legend>DIFFICULTY</legend>
+          <label><input type="radio" name="difficulty" value="easy"><span>Easy</span></label>
+          <label><input type="radio" name="difficulty" value="medium" checked><span>Medium</span></label>
+          <label><input type="radio" name="difficulty" value="hard"><span>Hard</span></label>
+        </fieldset>
+        <button class="quiet" id="show-rules">Rules</button>
+      </div>
+      <span class="version">v0.3 web</span>
+    </section>
+
+    <main class="game-screen" id="game-screen" hidden>
+      <header class="topbar">
+        <div>
+          <span class="brand-mark"></span>
+          <strong>LASER WAR</strong>
+        </div>
+        <p id="mode-label">VS COMPUTER</p>
+      </header>
+
+      <div class="game-layout">
+        <section class="board-region" aria-label="Laser War board">
+          <div class="board-stage">
+            <div class="laser-source left-source" aria-hidden="true"><span></span></div>
+            <div class="board-frame">
+              <div class="column-labels" id="column-labels"></div>
+              <div class="row-labels" id="row-labels"></div>
+              <div class="board" id="board" role="grid" aria-label="9 by 9 game board"></div>
+              <svg class="beams" id="beams" viewBox="0 0 900 900" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <div class="laser-source right-source" aria-hidden="true"><span></span></div>
+            <div class="result-overlay" id="result-overlay" hidden>
+              <h2 id="result-title">VICTORY</h2>
+              <div>
+                <button class="primary" id="play-again">Play Again</button>
+                <button id="result-menu">Main Menu</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <div class="status-block">
+            <span class="status-light" id="status-light"></span>
+            <div>
+              <p class="eyebrow">MATCH STATUS</p>
+              <h2 id="status">Your turn</h2>
+            </div>
+          </div>
+
+          <section class="control-band">
+            <p class="eyebrow">MIRROR</p>
+            <div class="mirror-picker" role="group" aria-label="Mirror orientation">
+              <button class="mirror-choice selected" id="select-slash" aria-label="Select slash mirror">/</button>
+              <button class="mirror-choice" id="select-backslash" aria-label="Select backslash mirror">\</button>
+            </div>
+          </section>
+
+          <section class="control-band">
+            <div class="toolbar">
+              <button id="undo" title="Undo one move" aria-label="Undo one move">↶ <span>Undo</span></button>
+              <button id="redo" title="Redo one move" aria-label="Redo one move">↷ <span>Redo</span></button>
+              <button id="pause" title="Pause" aria-label="Pause">Ⅱ <span>Pause</span></button>
+            </div>
+          </section>
+
+          <section class="log-band">
+            <div class="section-heading">
+              <p class="eyebrow">MATCH LOG</p>
+              <span id="move-count">0 moves</span>
+            </div>
+            <ol id="match-log"><li class="empty-log">Awaiting the first move.</li></ol>
+          </section>
+
+          <div class="ai-detail" id="ai-detail"></div>
+          <footer class="match-actions">
+            <button id="new-match">New Match</button>
+            <button id="main-menu">Main Menu</button>
+            <button class="icon-button" id="sound-toggle" aria-label="Toggle sound" title="Toggle sound">♪</button>
+          </footer>
+        </aside>
+      </div>
+    </main>
+
+    <div class="pause-overlay" id="pause-overlay" hidden>
+      <h2>PAUSED</h2>
+      <button class="primary" id="resume">Resume</button>
+      <button id="pause-restart">Restart Match</button>
+      <button id="pause-menu">Main Menu</button>
+    </div>
+
+    <dialog id="rules-dialog">
+      <form method="dialog">
+        <header>
+          <div>
+            <p class="kicker">FIELD MANUAL</p>
+            <h2>How to Play</h2>
+          </div>
+          <button class="icon-button" value="close" aria-label="Close rules">×</button>
+        </header>
+        <div class="rules-grid">
+          <section><h3>Place</h3><p>Choose / or \ and place one mirror on a highlighted empty square.</p></section>
+          <section><h3>Fire</h3><p>Both side lasers fire after every move. Mirrors turn a beam by 90 degrees.</p></section>
+          <section><h3>Damage</h3><p>A beam destroys the first shield it touches. Mirrors are permanent.</p></section>
+          <section><h3>Win</h3><p>Hit the opposing king without hitting your own. A simultaneous hit is a draw.</p></section>
+          <section><h3>Restrictions</h3><p>Mirrors cannot touch a king. Both kings and both lasers must retain a possible path.</p></section>
+          <section><h3>Controls</h3><p>Q and E select mirrors. U undoes. R restarts. Escape pauses.</p></section>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
