@@ -6,7 +6,9 @@ from math import inf
 from threading import Event
 from time import monotonic
 
-from .engine import Cell, Game, Move, State
+from .engine import TURNS, Cell, Game, Move, State
+
+MATE_SCORE = 10_000
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class ComputerAI:
         self.nodes = 0
         self.ordering: dict[State, Move] = {}
         self.history: dict[Move, int] = {}
+        self.killers: dict[int, list[Move]] = {}
         self.cache: dict[tuple[State, int], float] = {}
         self.children_cache: dict[State, list[tuple[Move, State]]] = {}
         self.profile = DIFFICULTIES["medium"]
@@ -69,6 +72,7 @@ class ComputerAI:
         self.nodes = 0
         self.ordering.clear()
         self.history.clear()
+        self.killers.clear()
         self.cache.clear()
         self.children_cache.clear()
 
@@ -115,7 +119,7 @@ class ComputerAI:
         alpha = -inf
         beta = inf
         ranked: list[tuple[float, Move]] = []
-        ordered = self._ordered_children(state, legal)
+        ordered = self._ordered_children(state, legal, ply=0)
         if depth >= 3 and self.profile.root_limit is not None:
             ordered = ordered[: self.profile.root_limit]
 
@@ -133,15 +137,20 @@ class ComputerAI:
         """Evaluate a subtree with alpha-beta negamax and move-order caches."""
         self._check_interrupted()
         self.nodes += 1
-        if depth <= 0 or state.winner or state.draw:
-            return self.game.evaluate(state)
+        if state.winner:
+            score = self.game.evaluate(state)
+            return score - ply if score > 0 else score + ply
+        if state.draw:
+            return 0
+        if depth <= 0:
+            return self._stabilized_evaluation(state, ply)
 
         cache_key = (state, depth)
         cached = self.cache.get(cache_key)
         if cached is not None:
             return cached
 
-        children = self._ordered_children(state)
+        children = self._ordered_children(state, ply=ply)
         if not children:
             return 0
         branch_limit = self._branch_limit(ply)
@@ -160,6 +169,10 @@ class ComputerAI:
             if alpha >= beta:
                 cutoff = True
                 self.history[move] = self.history.get(move, 0) + depth * depth
+                killers = self.killers.setdefault(ply, [])
+                if move not in killers:
+                    killers.insert(0, move)
+                    del killers[2:]
                 break
 
         if best_move is not None:
@@ -172,6 +185,8 @@ class ComputerAI:
         self,
         state: State,
         moves: list[Move] | None = None,
+        *,
+        ply: int = 0,
     ) -> list[tuple[Move, State]]:
         """Return legal children ordered by tactical and historical priority."""
         children = self.children_cache.get(state)
@@ -183,13 +198,21 @@ class ComputerAI:
             self.children_cache[state] = children
 
         preferred = self.ordering.get(state)
+        killers = self.killers.get(ply, [])
         return sorted(
             children,
-            key=lambda item: self._move_priority(state, item[0], item[1], preferred),
+            key=lambda item: self._move_priority(state, item[0], item[1], preferred, killers),
             reverse=True,
         )
 
-    def _move_priority(self, state: State, move: Move, child: State, preferred: Move | None) -> float:
+    def _move_priority(
+        self,
+        state: State,
+        move: Move,
+        child: State,
+        preferred: Move | None,
+        killers: list[Move],
+    ) -> float:
         """Rank a child for search ordering without changing its game value."""
         if child.winner == state.turn:
             return 1_000_000
@@ -207,7 +230,72 @@ class ComputerAI:
                     adjacent_mirrors += 1
 
         principal = 100_000 if move == preferred else 0
-        return principal + terminal + self.history.get(move, 0) + adjacent_mirrors * 20
+        killer = 50_000 - killers.index(move) * 5_000 if move in killers else 0
+        return principal + killer + terminal + self.history.get(move, 0) + adjacent_mirrors * 20
+
+    def _stabilized_evaluation(self, state: State, ply: int) -> float:
+        """Extend exposed-king horizons through all legal tactical evasions."""
+        score = self._strategic_evaluation(state)
+        if not any(beam.hit_king for beam in self.game.fire_lasers(state.board)):
+            return score
+
+        children = self._ordered_children(state, ply=ply)
+        if not children:
+            return 0
+        opponent = TURNS[state.turn]
+        best = -inf
+        for _move, child in children:
+            self._check_interrupted()
+            self.nodes += 1
+            if child.winner == state.turn:
+                return MATE_SCORE - (ply + 1)
+            if child.winner == opponent:
+                continue
+            candidate = 0 if child.draw else -self._strategic_evaluation(child)
+            best = max(best, candidate)
+        return -MATE_SCORE + (ply + 1) if best == -inf else best
+
+    def _strategic_evaluation(self, state: State) -> float:
+        """Score shield shape, live beam pressure, and route resilience."""
+        score = self.game.evaluate(state)
+        own = state.turn
+        opponent = TURNS[own]
+        own_king = Cell.TOP_KING if own == "top" else Cell.BOTTOM_KING
+        opponent_king = Cell.BOTTOM_KING if own == "top" else Cell.TOP_KING
+        score += self._shield_structure(state, own_king) - self._shield_structure(state, opponent_king)
+
+        reachable = self.game.reachable_kings_by_laser(state.board)
+        attack_routes = sum(opponent in kings for kings in reachable)
+        exposed_routes = sum(own in kings for kings in reachable)
+        score += (attack_routes - exposed_routes) * 18
+
+        hit_kings = {beam.hit_king for beam in self.game.fire_lasers(state.board) if beam.hit_king}
+        if opponent in hit_kings:
+            score += 240
+        if own in hit_kings:
+            score -= 240
+        return score
+
+    def _shield_structure(self, state: State, king: Cell) -> float:
+        """Weight close shields more heavily than loose outer protection."""
+        king_position = next(
+            ((row, col) for row, cells in enumerate(state.board) for col, cell in enumerate(cells) if cell == king),
+            None,
+        )
+        if king_position is None:
+            return 0
+        king_row, king_col = king_position
+        score = 0.0
+        for row, cells in enumerate(state.board):
+            for col, cell in enumerate(cells):
+                if cell != Cell.SHIELD:
+                    continue
+                distance = max(abs(row - king_row), abs(col - king_col))
+                if distance == 1:
+                    score += 18
+                elif distance == 2:
+                    score += 6
+        return score
 
     def _branch_limit(self, ply: int) -> int | None:
         """Return the configured selective-search width for a ply."""

@@ -183,6 +183,24 @@ class Game:
         own = state.turn
         opponent = TURNS[own]
 
+        reachable = self.reachable_kings_by_laser(next_board)
+        for label, kings in zip(("left", "right"), reachable, strict=True):
+            if not kings:
+                raise IllegalMoveError(
+                    f"{label}_laser_stranded",
+                    f"Illegal move: it leaves the {label} laser with no possible path to either king.",
+                )
+        if not any(own in kings for kings in reachable):
+            raise IllegalMoveError(
+                "own_king_unreachable",
+                "Illegal move: it fully blocks all possible laser paths to your king.",
+            )
+        if not any(opponent in kings for kings in reachable):
+            raise IllegalMoveError(
+                "opponent_king_unreachable",
+                "Illegal move: it fully blocks all possible laser paths to the opponent's king.",
+            )
+
         if own in hit_kings and opponent in hit_kings:
             next_state = State(next_board, turn=opponent, draw=True)
         elif opponent in hit_kings:
@@ -190,23 +208,6 @@ class Game:
         elif own in hit_kings:
             next_state = State(next_board, turn=opponent, winner=opponent)
         else:
-            reachable = self.reachable_kings_by_laser(next_board)
-            if not any(own in kings for kings in reachable):
-                raise IllegalMoveError(
-                    "own_king_unreachable",
-                    "Illegal move: it fully blocks all possible laser paths to your king.",
-                )
-            if not any(opponent in kings for kings in reachable):
-                raise IllegalMoveError(
-                    "opponent_king_unreachable",
-                    "Illegal move: it fully blocks all possible laser paths to the opponent's king.",
-                )
-            for label, kings in zip(("left", "right"), reachable, strict=True):
-                if not kings:
-                    raise IllegalMoveError(
-                        f"{label}_laser_stranded",
-                        f"Illegal move: it leaves the {label} laser with no possible path to either king.",
-                    )
             if check_no_legal_moves:
                 provisional = State(next_board, turn=opponent)
                 next_state = State(next_board, turn=opponent, draw=not self.has_any_legal_move(provisional))

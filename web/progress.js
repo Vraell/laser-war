@@ -5,6 +5,9 @@ export const PROGRESS_VERSION = 1;
 export function loadProgress(storage) {
   try {
     const data = JSON.parse(storage.getItem(PROGRESS_KEY));
+    if (data?.ultraUnlocked === true) {
+      return { ultraUnlocked: true };
+    }
     if (data?.version === PROGRESS_VERSION) {
       return { ultraUnlocked: Boolean(data.ultraUnlocked) };
     }

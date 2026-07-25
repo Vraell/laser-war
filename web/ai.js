@@ -6,6 +6,7 @@ const ULTRA_PROFILE = {
   rootLimit: 24,
   branchLimits: [22, 12, 8],
 };
+const MATE_SCORE = 10_000;
 
 class SearchInterrupted extends Error {}
 
@@ -118,7 +119,7 @@ function standardMove(game, state, difficulty, random) {
   };
 }
 
-class UltraSearch {
+export class UltraSearch {
   /** Initialize caches and timing for one Ultra search. */
   constructor(game, now) {
     this.game = game;
@@ -127,6 +128,7 @@ class UltraSearch {
     this.nodes = 0;
     this.ordering = new Map();
     this.history = new Map();
+    this.killers = new Map();
     this.cache = new Map();
     this.childrenCache = new Map();
   }
@@ -172,7 +174,7 @@ class UltraSearch {
   searchRoot(state, depth) {
     let alpha = -Infinity;
     const beta = Infinity;
-    let children = this.orderedChildren(state);
+    let children = this.orderedChildren(state, 0);
     if (depth >= 3) children = children.slice(0, ULTRA_PROFILE.rootLimit);
     const ranked = [];
     for (const { move, state: child } of children) {
@@ -189,12 +191,17 @@ class UltraSearch {
   negamax(state, depth, alpha, beta, ply) {
     this.checkInterrupted();
     this.nodes += 1;
-    if (depth <= 0 || state.winner || state.draw) return this.game.evaluate(state);
+    if (state.winner) {
+      const score = this.game.evaluate(state);
+      return score > 0 ? score - ply : score + ply;
+    }
+    if (state.draw) return 0;
+    if (depth <= 0) return this.stabilizedEvaluation(state, ply);
 
     const cacheKey = `${stateKey(state)}|${depth}`;
     if (this.cache.has(cacheKey)) return this.cache.get(cacheKey);
 
-    let children = this.orderedChildren(state);
+    let children = this.orderedChildren(state, ply);
     if (!children.length) return 0;
     const branchLimit = ULTRA_PROFILE.branchLimits[
       Math.min(Math.max(0, ply - 1), ULTRA_PROFILE.branchLimits.length - 1)
@@ -215,6 +222,12 @@ class UltraSearch {
         cutoff = true;
         const key = moveKey(move);
         this.history.set(key, (this.history.get(key) || 0) + depth * depth);
+        const killers = this.killers.get(ply) || [];
+        if (!killers.includes(key)) {
+          killers.unshift(key);
+          killers.splice(2);
+          this.killers.set(ply, killers);
+        }
         break;
       }
     }
@@ -224,7 +237,7 @@ class UltraSearch {
   }
 
   /** Return legal children sorted by tactical search priority. */
-  orderedChildren(state) {
+  orderedChildren(state, ply = 0) {
     const key = stateKey(state);
     let children = this.childrenCache.get(key);
     if (!children) {
@@ -232,14 +245,15 @@ class UltraSearch {
       this.childrenCache.set(key, children);
     }
     const preferred = this.ordering.get(key);
+    const killers = this.killers.get(ply) || [];
     return [...children].sort((left, right) => (
-      this.movePriority(state, right.move, right.state, preferred)
-      - this.movePriority(state, left.move, left.state, preferred)
+      this.movePriority(state, right.move, right.state, preferred, killers)
+      - this.movePriority(state, left.move, left.state, preferred, killers)
     ));
   }
 
   /** Rank a move for ordering without changing its position value. */
-  movePriority(state, move, child, preferred) {
+  movePriority(state, move, child, preferred, killers) {
     if (child.winner === state.turn) return 1_000_000;
     if (child.winner) return -1_000_000;
     const terminal = child.draw ? 0 : -this.game.evaluate(child) * 1000;
@@ -250,10 +264,76 @@ class UltraSearch {
       }
     }
     const key = moveKey(move);
+    const killerIndex = killers.indexOf(key);
     return (key === preferred ? 100_000 : 0)
+      + (killerIndex >= 0 ? 50_000 - killerIndex * 5_000 : 0)
       + terminal
       + (this.history.get(key) || 0)
       + adjacentMirrors * 20;
+  }
+
+  /** Extend exposed-king horizons through all legal tactical evasions. */
+  stabilizedEvaluation(state, ply) {
+    const score = this.strategicEvaluation(state);
+    if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing)) return score;
+
+    const children = this.orderedChildren(state, ply);
+    if (!children.length) return 0;
+    const opponent = state.turn === "top" ? "bottom" : "top";
+    let best = -Infinity;
+    for (const { state: child } of children) {
+      this.checkInterrupted();
+      this.nodes += 1;
+      if (child.winner === state.turn) return MATE_SCORE - (ply + 1);
+      if (child.winner === opponent) continue;
+      const candidate = child.draw ? 0 : -this.strategicEvaluation(child);
+      best = Math.max(best, candidate);
+    }
+    return best === -Infinity ? -MATE_SCORE + (ply + 1) : best;
+  }
+
+  /** Score shield shape, live beam pressure, and route resilience. */
+  strategicEvaluation(state) {
+    let score = this.game.evaluate(state);
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    const ownKing = own === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING;
+    const opponentKing = own === "top" ? Cell.BOTTOM_KING : Cell.TOP_KING;
+    score += this.shieldStructure(state, ownKing) - this.shieldStructure(state, opponentKing);
+
+    const reachable = this.game.reachableKingsByLaser(state.board);
+    const attackRoutes = reachable.filter((kings) => kings.has(opponent)).length;
+    const exposedRoutes = reachable.filter((kings) => kings.has(own)).length;
+    score += (attackRoutes - exposedRoutes) * 18;
+
+    const hitKings = new Set(this.game.fireLasers(state.board).map((beam) => beam.hitKing).filter(Boolean));
+    if (hitKings.has(opponent)) score += 240;
+    if (hitKings.has(own)) score -= 240;
+    return score;
+  }
+
+  /** Weight close shields more heavily than loose outer protection. */
+  shieldStructure(state, king) {
+    let kingPosition = null;
+    for (let row = 0; row < BOARD_SIZE && !kingPosition; row += 1) {
+      for (let col = 0; col < BOARD_SIZE; col += 1) {
+        if (state.board[row][col] === king) {
+          kingPosition = [row, col];
+          break;
+        }
+      }
+    }
+    if (!kingPosition) return 0;
+    let score = 0;
+    for (let row = 0; row < BOARD_SIZE; row += 1) {
+      for (let col = 0; col < BOARD_SIZE; col += 1) {
+        if (state.board[row][col] !== Cell.SHIELD) continue;
+        const distance = Math.max(Math.abs(row - kingPosition[0]), Math.abs(col - kingPosition[1]));
+        if (distance === 1) score += 18;
+        else if (distance === 2) score += 6;
+      }
+    }
+    return score;
   }
 
   /** Abort once the configured search deadline is reached. */

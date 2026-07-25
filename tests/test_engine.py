@@ -1,9 +1,30 @@
+import json
 import unittest
+from pathlib import Path
 
 from laser_war.engine import Cell, Game, Move, State
 
 
 class EngineTests(unittest.TestCase):
+    def test_reported_forced_loss_still_enforces_terminal_path_rules(self):
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "forced_loss_40_move_log.json").read_text(encoding="utf-8")
+        )
+        game = Game()
+        state = game.initial_state()
+        for row, col, mirror in fixture["moves"][:-1]:
+            state = game.resolve_move(state, Move(row - 1, col - 1, Cell(mirror))).state
+
+        row, col, mirror = fixture["moves"][-1]
+        reported_move = Move(row - 1, col - 1, Cell(mirror))
+        self.assertEqual(game.illegal_move_reason(state, reported_move), "right_laser_stranded")
+        with self.assertRaisesRegex(ValueError, "right laser"):
+            game.resolve_move(state, reported_move)
+
+        legal_children = game.legal_children(state)
+        self.assertTrue(legal_children)
+        self.assertTrue(all(child.winner == "bottom" for _move, child in legal_children))
+
     def test_initial_position_and_laser_entry_squares(self):
         game = Game()
         state = game.initial_state()

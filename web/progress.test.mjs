@@ -26,5 +26,7 @@ assert.equal(recordResult(progress, { mode: "computer", difficulty: "hard", winn
 assert.equal(progress.ultraUnlocked, true);
 saveProgress(storage, progress);
 assert.equal(loadProgress(storage).ultraUnlocked, true);
+storage.setItem("laser-war.progress.v1", JSON.stringify({ version: 999, ultraUnlocked: true }));
+assert.equal(loadProgress(storage).ultraUnlocked, true);
 
 console.log("Web progress checks passed.");

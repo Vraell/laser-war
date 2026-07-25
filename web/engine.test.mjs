@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { chooseComputerMove } from "./ai.js";
 import { Cell, Game } from "./engine.js";
@@ -121,5 +122,20 @@ const correctedChoice = chooseComputerMove(game, selfKillState, "hard");
 const correctedOutcome = game.resolveMove(selfKillState, correctedChoice.move, false);
 assert.notDeepEqual(correctedChoice.move, selfKill);
 assert.notEqual(correctedOutcome.state.winner, "bottom");
+
+const forcedLossFixture = JSON.parse(readFileSync(
+  new URL("../tests/fixtures/forced_loss_40_move_log.json", import.meta.url),
+  "utf8",
+));
+let forcedLossState = game.initialState();
+for (const [row, col, mirror] of forcedLossFixture.moves.slice(0, -1)) {
+  forcedLossState = game.resolveMove(forcedLossState, { row: row - 1, col: col - 1, mirror }).state;
+}
+const [reportedRow, reportedCol, reportedMirror] = forcedLossFixture.moves.at(-1);
+const reportedMove = { row: reportedRow - 1, col: reportedCol - 1, mirror: reportedMirror };
+assert.equal(game.illegalMoveReason(forcedLossState, reportedMove), "rightLaserStranded");
+const forcedChoice = chooseComputerMove(game, forcedLossState, "hard");
+assert.equal(game.isLegalMove(forcedLossState, forcedChoice.move), true);
+assert.equal(game.resolveMove(forcedLossState, forcedChoice.move).state.winner, "bottom");
 
 console.log("Native web engine checks passed.");

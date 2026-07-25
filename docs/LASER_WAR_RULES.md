@@ -101,6 +101,7 @@ After a move is applied and laser damage is resolved:
 - each laser must still have a possible path to at least one king.
 
 A player cannot make either king permanently unreachable or leave either laser permanently stranded.
+This validation applies to every move, including a volley that hits one or both kings.
 
 For this reconstruction:
 

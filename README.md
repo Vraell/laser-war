@@ -32,6 +32,9 @@ The game includes:
 - a scrollable current-match log with one-click clipboard copying.
 
 Ultra unlocks after the player defeats the Hard computer. Progress is stored locally on each device.
+Ultra combines iterative-deepening alpha-beta search with tactical king-threat stabilization, mate-distance
+scoring, shield and laser-route evaluation, and principal-variation, history, and killer-move ordering.
+An earned Ultra unlock is preserved when the progress-data format or game version changes.
 
 The interface uses the bundled Inter typeface under the SIL Open Font License.
 
@@ -71,7 +74,7 @@ same board, laser, damage, king-safety, and anti-fortress rules as the Python en
 startup delay.
 
 The rules engine is independent of Pygame. `session.py` owns reversible match history and saves, `progress.py`
-owns unlock progression, `ai.py` owns time-bounded search, and `pygame_app.py` owns presentation and input.
+owns monotonic unlock progression, `ai.py` owns time-bounded search, and `pygame_app.py` owns presentation and input.
 The browser runs computer searches in a Web Worker so deeper searches do not block touch or rendering.
 
 The Python client updates one JSON record per match after every move. On macOS these records are stored in

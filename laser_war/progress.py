@@ -20,6 +20,8 @@ class Progress:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return cls()
+        if data.get("ultra_unlocked") is True:
+            return cls(ultra_unlocked=True)
         if data.get("version") != PROGRESS_VERSION:
             return cls()
         return cls(ultra_unlocked=bool(data.get("ultra_unlocked")))

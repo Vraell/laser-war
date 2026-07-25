@@ -147,6 +147,20 @@ export class Game {
 
     const own = state.turn;
     const opponent = TURNS[own];
+    const reachable = this.reachableKingsByLaser(damaged);
+    for (let index = 0; index < reachable.length; index += 1) {
+      if (!reachable[index].size) {
+        const side = index === 0 ? "left" : "right";
+        throw illegalMove(`${side}LaserStranded`, `That move strands the ${side} laser.`);
+      }
+    }
+    if (!reachable.some((kings) => kings.has(own))) {
+      throw illegalMove("ownKingUnreachable", "That move blocks every possible laser path to your king.");
+    }
+    if (!reachable.some((kings) => kings.has(opponent))) {
+      throw illegalMove("opponentKingUnreachable", "That move blocks every possible laser path to the opposing king.");
+    }
+
     let nextState;
     if (hitKings.has(own) && hitKings.has(opponent)) {
       nextState = { board: damaged, turn: opponent, winner: null, draw: true };
@@ -155,19 +169,6 @@ export class Game {
     } else if (hitKings.has(own)) {
       nextState = { board: damaged, turn: opponent, winner: opponent, draw: false };
     } else {
-      const reachable = this.reachableKingsByLaser(damaged);
-      if (!reachable.some((kings) => kings.has(own))) {
-        throw illegalMove("ownKingUnreachable", "That move blocks every possible laser path to your king.");
-      }
-      if (!reachable.some((kings) => kings.has(opponent))) {
-        throw illegalMove("opponentKingUnreachable", "That move blocks every possible laser path to the opposing king.");
-      }
-      for (let index = 0; index < reachable.length; index += 1) {
-        if (!reachable[index].size) {
-          const side = index === 0 ? "left" : "right";
-          throw illegalMove(`${side}LaserStranded`, `That move strands the ${side} laser.`);
-        }
-      }
       nextState = { board: damaged, turn: opponent, winner: null, draw: false };
       if (checkNoLegalMoves && !this.hasAnyLegalMove(nextState)) nextState.draw = true;
     }

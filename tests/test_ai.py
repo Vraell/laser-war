@@ -1,9 +1,13 @@
+import json
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 
-from laser_war.ai import DIFFICULTIES, ComputerAI
+from laser_war.ai import DIFFICULTIES, MATE_SCORE, ComputerAI
 from laser_war.engine import Cell, Game, Move
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class AITests(unittest.TestCase):
@@ -85,14 +89,30 @@ class AITests(unittest.TestCase):
 
         profile = DIFFICULTIES["ultra"]
         DIFFICULTIES["ultra"] = replace(profile, time_limit=30.0)
+        ai = ComputerAI(game)
         try:
-            result = ComputerAI(game).choose_move(state, "ultra")
+            result = ai.choose_move(state, "ultra")
         finally:
             DIFFICULTIES["ultra"] = profile
 
         self.assertGreaterEqual(result.depth, 4)
         self.assertIn(result.move, game.legal_moves(state))
         self.assertNotEqual(result.move, Move(0, 8, Cell.MIRROR_SLASH))
+        self.assertTrue(ai.killers)
+
+    def test_ultra_stabilizes_exposed_king_horizon_as_forced_loss(self):
+        game = Game()
+        state = game.initial_state()
+        fixture = json.loads((FIXTURES / "forced_loss_40_move_log.json").read_text())
+        for row, col, mirror in fixture["moves"][:-1]:
+            move = Move(row - 1, col - 1, Cell(mirror))
+            state = game.resolve_move(state, move).state
+
+        ai = ComputerAI(game)
+        score = ai._stabilized_evaluation(state, ply=4)
+
+        self.assertEqual(score, -MATE_SCORE + 5)
+        self.assertGreater(ai.nodes, 0)
 
 
 if __name__ == "__main__":
