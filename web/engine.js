@@ -47,6 +47,38 @@ function illegalMove(code, message) {
   return error;
 }
 
+/** Push one cost-first tuple into a binary min-heap. */
+function pushCost(frontier, item) {
+  frontier.push(item);
+  let index = frontier.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (frontier[parent][0] <= item[0]) break;
+    frontier[index] = frontier[parent];
+    index = parent;
+  }
+  frontier[index] = item;
+}
+
+/** Pop the lowest-cost tuple from a binary min-heap. */
+function popCost(frontier) {
+  const first = frontier[0];
+  const tail = frontier.pop();
+  if (!frontier.length) return first;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    if (left >= frontier.length) break;
+    const child = right < frontier.length && frontier[right][0] < frontier[left][0] ? right : left;
+    if (frontier[child][0] >= tail[0]) break;
+    frontier[index] = frontier[child];
+    index = child;
+  }
+  frontier[index] = tail;
+  return first;
+}
+
 export class Game {
   /** Initialize fixed laser geometry and the reachability cache. */
   constructor() {
@@ -57,6 +89,7 @@ export class Game {
     this.laserEntrySquares = new Set([key(MIDDLE_ROW, 0), key(MIDDLE_ROW, BOARD_SIZE - 1)]);
     this.reachabilityCache = new Map();
     this.jointReachabilityCache = new Map();
+    this.routeCostCache = new Map();
   }
 
   /** Create the symmetric opening position for a new match. */
@@ -306,6 +339,69 @@ export class Game {
       this.jointReachabilityCache.delete(this.jointReachabilityCache.keys().next().value);
     }
     return available;
+  }
+
+  /** Return minimum future-mirror counts from each laser to each king. */
+  routeCostsByLaser(board) {
+    const boardKey = board.map((row) => row.join("")).join("");
+    if (this.routeCostCache.has(boardKey)) return this.routeCostCache.get(boardKey);
+    const costs = this.sources.map((source) => this.routeCosts(board, source));
+    this.routeCostCache.set(boardKey, costs);
+    if (this.routeCostCache.size > 4096) {
+      this.routeCostCache.delete(this.routeCostCache.keys().next().value);
+    }
+    return costs;
+  }
+
+  /** Find shortest individual routes with cost-first graph search. */
+  routeCosts(board, source) {
+    const forbiddenTurns = this.mirrorForbiddenSquares(board);
+    const sourceKey = `${source[0]},${source[1]},${source[2]}`;
+    const distances = new Map([[sourceKey, 0]]);
+    const frontier = [];
+    const costs = {};
+    pushCost(frontier, [0, source]);
+
+    while (frontier.length && Object.keys(costs).length < 2) {
+      const [cost, [row, col, direction]] = popCost(frontier);
+      if (cost !== distances.get(`${row},${col},${direction}`)) continue;
+      const [dr, dc] = DIRS[direction];
+      const nextRow = row + dr;
+      const nextCol = col + dc;
+      if (!this.inBounds(nextRow, nextCol)) continue;
+
+      const cell = board[nextRow][nextCol];
+      if (cell === Cell.TOP_KING || cell === Cell.BOTTOM_KING) {
+        const target = cell === Cell.TOP_KING ? "top" : "bottom";
+        if (costs[target] === undefined) costs[target] = cost;
+        continue;
+      }
+
+      const options = [];
+      if (cell === Cell.SLASH) {
+        options.push([SLASH[direction], cost]);
+      } else if (cell === Cell.BACKSLASH) {
+        options.push([BACKSLASH[direction], cost]);
+      } else if (cell === Cell.EMPTY) {
+        options.push([direction, cost]);
+        if (!forbiddenTurns.has(key(nextRow, nextCol))) {
+          for (const turned of this.turns(direction)) options.push([turned, cost + 1]);
+        }
+      } else if (cell === Cell.SHIELD) {
+        options.push([direction, cost + 1]);
+        if (!forbiddenTurns.has(key(nextRow, nextCol))) {
+          for (const turned of this.turns(direction)) options.push([turned, cost + 2]);
+        }
+      }
+
+      for (const [nextDirection, nextCost] of options) {
+        const nextKey = `${nextRow},${nextCol},${nextDirection}`;
+        if (nextCost >= (distances.get(nextKey) ?? Infinity)) continue;
+        distances.set(nextKey, nextCost);
+        pushCost(frontier, [nextCost, [nextRow, nextCol, nextDirection]]);
+      }
+    }
+    return costs;
   }
 
   /** Find compatible route assignments for one left/right king pairing. */

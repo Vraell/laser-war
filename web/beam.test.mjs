@@ -19,6 +19,10 @@ assert.deepEqual(
   beamPoints({ path: [[1, 0, "N"]], exited: true, exitDirection: "W" }, 0).at(-1),
   [0, 150],
 );
+assert.deepEqual(
+  beamPoints({ path: [[7, 5, "S"], [8, 5, "S"]], exited: true }, 1).at(-1),
+  [550, 900],
+);
 
 const reportedGame = new Game();
 let reportedState = reportedGame.initialState();

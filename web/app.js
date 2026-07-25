@@ -1,19 +1,19 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.2";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.3";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.2";
+} from "./save.js?v=0.11.3";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.2";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.2";
-import { beamPoints } from "./beam.js?v=0.11.2";
-import { drawDetailKey } from "./result.js?v=0.11.2";
+} from "./progress.js?v=0.11.3";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.3";
+import { beamPoints } from "./beam.js?v=0.11.3";
+import { drawDetailKey } from "./result.js?v=0.11.3";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -214,7 +214,7 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.11.2", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.11.3", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
     finishComputerTurn(data.result);
@@ -469,6 +469,16 @@ function renderBeams(beams) {
       line.setAttribute("class", className);
       if (className === "beam-core") line.style.stroke = color;
       elements.beams.append(line);
+    }
+    if (beam.hitShield) {
+      const [row, col] = beam.hitShield;
+      const impact = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      impact.setAttribute("cx", String(col * 100 + 50));
+      impact.setAttribute("cy", String(row * 100 + 50));
+      impact.setAttribute("r", "14");
+      impact.setAttribute("class", "beam-impact");
+      impact.style.setProperty("--beam-color", color);
+      elements.beams.append(impact);
     }
   });
 }

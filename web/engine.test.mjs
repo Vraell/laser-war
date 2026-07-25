@@ -72,6 +72,9 @@ assert.equal(game.isLegalMove(strandingState, { row: 0, col: 7, mirror: "\\" }),
 assert.equal(game.illegalMoveReason(strandingState, { row: 0, col: 7, mirror: "\\" }), "rightLaserStranded");
 
 const tacticalGame = {
+  isLegalMove() {
+    return true;
+  },
   legalChildren(state) {
     if (state.kind === "root") {
       return Array.from({ length: 16 }, (_, index) => ({

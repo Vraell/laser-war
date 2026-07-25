@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#0e1215">
     <meta name="description" content="Laser War, a tactical mirror strategy game.">
     <title>Laser War</title>
-    <link rel="icon" href="assets/app-icon.png?v=0.11.2">
-    <link rel="stylesheet" href="styles.css?v=0.11.2">
+    <link rel="icon" href="assets/app-icon.png?v=0.11.3">
+    <link rel="stylesheet" href="styles.css?v=0.11.3">
   </head>
   <body>
     <section class="menu-screen" id="menu-screen">
@@ -42,7 +42,7 @@
           <button class="quiet" id="show-rules" data-i18n="rules">Rules</button>
         </div>
       </div>
-      <span class="version">v0.11.2 web</span>
+      <span class="version">v0.11.3 web</span>
     </section>
 
     <main class="game-screen" id="game-screen" hidden>
@@ -139,13 +139,13 @@
           <section><h3 data-i18n="fire">Fire</h3><p data-i18n="fireRule">Both side lasers fire after every move. Mirrors turn a beam by 90 degrees.</p></section>
           <section><h3 data-i18n="damage">Damage</h3><p data-i18n="damageRule">A beam destroys the first shield it touches. Mirrors are permanent.</p></section>
           <section><h3 data-i18n="win">Win</h3><p data-i18n="winRule">Hit the opposing king without hitting your own. A simultaneous hit is a draw.</p></section>
-          <section><h3 data-i18n="restrictions">Restrictions</h3><p data-i18n="restrictionsRule">Mirrors cannot touch a king. Both lasers must retain compatible routes to different kings.</p></section>
-          <section><h3 data-i18n="paths">Paths</h3><p data-i18n="pathsRule">The two future routes must coexist on one layout using at most five new mirrors.</p></section>
+          <section><h3 data-i18n="restrictions">Restrictions</h3><p data-i18n="restrictionsRule">Mirrors are forbidden at laser entrances and next to kings.</p></section>
+          <section><h3 data-i18n="paths">Paths</h3><p data-i18n="pathsRule">After every move, both lasers must retain viable routes that keep both kings in play.</p></section>
         </div>
       </form>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="app.js?v=0.11.2"></script>
+    <script type="module" src="app.js?v=0.11.3"></script>
   </body>
 </html>

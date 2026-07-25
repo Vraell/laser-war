@@ -11,6 +11,37 @@ from .engine import TURNS, Cell, Game, Move, State
 MATE_SCORE = 10_000
 
 
+def _signed_square(value: int) -> int:
+    """Preserve direction while emphasizing large route-control gaps."""
+    return value * abs(value)
+
+
+def _bounded_route_cost(costs: dict[str, int], player: str) -> int:
+    """Cap heuristic route distance so it can never overwhelm mate scores."""
+    return min(costs.get(player, 12), 12)
+
+
+def route_pressure_score(
+    route_costs: tuple[dict[str, int], dict[str, int]],
+    own: str,
+    opponent: str,
+) -> int:
+    """Score attack tempo and per-laser control from one player's perspective."""
+    attack_costs = sorted(_bounded_route_cost(costs, opponent) for costs in route_costs)
+    danger_costs = sorted(_bounded_route_cost(costs, own) for costs in route_costs)
+    race_gap = danger_costs[0] - attack_costs[0]
+    control_gaps = [
+        _bounded_route_cost(costs, own) - _bounded_route_cost(costs, opponent)
+        for costs in route_costs
+    ]
+    return (
+        race_gap * 42
+        + (sum(danger_costs) - sum(attack_costs)) * 12
+        + _signed_square(race_gap) * 18
+        + sum(_signed_square(gap) for gap in control_gaps) * 8
+    )
+
+
 @dataclass(frozen=True)
 class DifficultyProfile:
     label: str
@@ -22,10 +53,10 @@ class DifficultyProfile:
 
 
 DIFFICULTIES = {
-    "easy": DifficultyProfile("Easy", 0.20, 1, 5),
-    "medium": DifficultyProfile("Medium", 1.25, 3, 1),
-    "hard": DifficultyProfile("Hard", 3.50, 5, 1),
-    "ultra": DifficultyProfile("Ultra", 6.0, 10, 1, 24, (22, 12, 8)),
+    "easy": DifficultyProfile("Easy", 0.20, 1, 5, 8),
+    "medium": DifficultyProfile("Medium", 1.25, 3, 1, 18, (14, 8)),
+    "hard": DifficultyProfile("Hard", 3.50, 5, 1, 24, (18, 12, 8)),
+    "ultra": DifficultyProfile("Ultra", 6.0, 10, 1, 16, (14, 10, 7)),
 }
 
 
@@ -53,8 +84,10 @@ class ComputerAI:
         self.ordering: dict[State, Move] = {}
         self.history: dict[Move, int] = {}
         self.killers: dict[int, list[Move]] = {}
-        self.cache: dict[tuple[State, int], float] = {}
+        self.cache: dict[tuple[State, int], tuple[float, str]] = {}
         self.children_cache: dict[State, list[tuple[Move, State]]] = {}
+        self.strict_children: set[State] = set()
+        self.legality_cache: dict[State, dict[Move, bool]] = {}
         self.profile = DIFFICULTIES["medium"]
 
     def choose_move(
@@ -67,7 +100,8 @@ class ComputerAI:
         profile = DIFFICULTIES.get(difficulty, DIFFICULTIES["medium"])
         self.profile = profile
         started = monotonic()
-        self.deadline = started + profile.time_limit
+        hard_reserve = 0.15 if profile.label == "Ultra" else 0.02
+        self.deadline = started + max(0.05, profile.time_limit - hard_reserve)
         soft_deadline, late_position = self._soft_deadline(state, started)
         self.cancel_event = cancel_event
         self.nodes = 0
@@ -76,23 +110,33 @@ class ComputerAI:
         self.killers.clear()
         self.cache.clear()
         self.children_cache.clear()
+        self.strict_children.clear()
+        self.legality_cache.clear()
 
-        children = self.game.legal_children(state)
+        fast_children = self.game.legal_children(state, check_joint_paths=False)
+        self.children_cache[state] = fast_children
+        children = self._root_children(state, profile.root_limit)
         if not children:
             return SearchResult(None, self.game.evaluate(state), 0, self.nodes, monotonic() - started)
         self.children_cache[state] = children
+        self.strict_children.add(state)
         legal = [move for move, _child in children]
 
-        best_move = legal[0]
-        best_score = -inf
-        completed_depth = 0
-        ranked: list[tuple[float, Move]] = []
+        fallback_move, fallback_child = self._ordered_children(state, legal, ply=0)[0]
+        best_move = fallback_move
+        best_score = -self._strategic_evaluation(fallback_child)
+        cancelled = cancel_event is not None and cancel_event.is_set()
+        completed_depth = 0 if cancelled else 1
+        self.nodes = len(children)
+        ranked = [
+            (-self._strategic_evaluation(child), move)
+            for move, child in self._ordered_children(state, legal, ply=0)
+        ]
 
         for depth in range(1, profile.max_depth + 1):
             iteration_started = monotonic()
             configured_deadline = self.deadline
-            if depth == 1:
-                self.deadline = inf
+            self.deadline = min(self.deadline, soft_deadline)
             try:
                 score, move, iteration_ranked = self._search_root(state, depth, legal)
             except SearchInterrupted:
@@ -120,6 +164,24 @@ class ComputerAI:
 
         return SearchResult(best_move, best_score, completed_depth, self.nodes, monotonic() - started)
 
+    def _root_children(
+        self,
+        state: State,
+        limit: int | None,
+    ) -> list[tuple[Move, State]]:
+        """Rank approximate root moves, then retain only fully legal candidates."""
+        ordered = self._ordered_children(state, ply=0)
+        selected = []
+        for item in ordered:
+            move = item[0]
+            legal = self.game.is_legal_move(state, move)
+            self.legality_cache.setdefault(state, {})[move] = legal
+            if legal:
+                selected.append(item)
+                if limit is not None and len(selected) == limit:
+                    break
+        return selected
+
     def _search_root(
         self,
         state: State,
@@ -131,7 +193,7 @@ class ComputerAI:
         beta = inf
         ranked: list[tuple[float, Move]] = []
         ordered = self._ordered_children(state, legal, ply=0)
-        if depth >= 3 and self.profile.root_limit is not None:
+        if self.profile.root_limit is not None:
             ordered = ordered[: self.profile.root_limit]
 
         for move, child in ordered:
@@ -156,20 +218,31 @@ class ComputerAI:
         if depth <= 0:
             return self._stabilized_evaluation(state, ply)
 
+        original_alpha = alpha
+        original_beta = beta
         cache_key = (state, depth)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            cached_value, bound = cached
+            if bound == "exact":
+                return cached_value
+            if bound == "lower":
+                alpha = max(alpha, cached_value)
+            else:
+                beta = min(beta, cached_value)
+            if alpha >= beta:
+                return cached_value
 
         children = self._ordered_children(state, ply=ply)
         if not children:
             return 0
         branch_limit = self._branch_limit(ply)
         if branch_limit is not None:
-            children = children[:branch_limit]
+            children = self._strict_subset(state, children, branch_limit)
+            if not children:
+                return 0
 
         value = -inf
-        cutoff = False
         best_move: Move | None = None
         for move, child in children:
             score = -self._negamax(child, depth - 1, -beta, -alpha, ply=ply + 1)
@@ -178,7 +251,6 @@ class ComputerAI:
                 best_move = move
             alpha = max(alpha, value)
             if alpha >= beta:
-                cutoff = True
                 self.history[move] = self.history.get(move, 0) + depth * depth
                 killers = self.killers.setdefault(ply, [])
                 if move not in killers:
@@ -188,8 +260,13 @@ class ComputerAI:
 
         if best_move is not None:
             self.ordering[state] = best_move
-        if not cutoff:
-            self.cache[cache_key] = value
+        if value <= original_alpha:
+            bound = "upper"
+        elif value >= original_beta:
+            bound = "lower"
+        else:
+            bound = "exact"
+        self.cache[cache_key] = (value, bound)
         return value
 
     def _ordered_children(
@@ -216,6 +293,31 @@ class ComputerAI:
             reverse=True,
         )
 
+    def _strict_subset(
+        self,
+        state: State,
+        children: list[tuple[Move, State]],
+        limit: int,
+    ) -> list[tuple[Move, State]]:
+        """Select the highest-ranked fully legal children up to one branch limit."""
+        if state in self.strict_children:
+            return children[:limit]
+
+        legality = self.legality_cache.setdefault(state, {})
+        selected = []
+        for item in children:
+            self._check_interrupted()
+            move = item[0]
+            legal = legality.get(move)
+            if legal is None:
+                legal = self.game.is_legal_move(state, move)
+                legality[move] = legal
+            if legal:
+                selected.append(item)
+                if len(selected) == limit:
+                    break
+        return selected
+
     def _move_priority(
         self,
         state: State,
@@ -232,7 +334,7 @@ class ComputerAI:
         elif child.winner:
             return -1_000_000
         else:
-            terminal = -self.game.evaluate(child) * 1_000
+            terminal = -self._strategic_evaluation(child) * 1_000
 
         adjacent_mirrors = 0
         for row in range(max(0, move.row - 1), min(self.game.size, move.row + 2)):
@@ -250,18 +352,19 @@ class ComputerAI:
         if not any(beam.hit_king for beam in self.game.fire_lasers(state.board)):
             return score
 
-        children = self._ordered_children(state, ply=ply)
-        if not children:
-            return 0
         opponent = TURNS[state.turn]
+        apparent_survivals = [
+            item
+            for item in self._ordered_children(state, ply=ply)
+            if item[1].winner != opponent
+        ]
+        children = self._strict_subset(state, apparent_survivals, 8)
         best = -inf
         for _move, child in children:
             self._check_interrupted()
             self.nodes += 1
             if child.winner == state.turn:
                 return MATE_SCORE - (ply + 1)
-            if child.winner == opponent:
-                continue
             candidate = 0 if child.draw else -self._strategic_evaluation(child)
             best = max(best, candidate)
         return -MATE_SCORE + (ply + 1) if best == -inf else best
@@ -279,6 +382,9 @@ class ComputerAI:
         attack_routes = sum(opponent in kings for kings in reachable)
         exposed_routes = sum(own in kings for kings in reachable)
         score += (attack_routes - exposed_routes) * 18
+
+        route_costs = self.game.route_costs_by_laser(state.board)
+        score += route_pressure_score(route_costs, own, opponent)
 
         hit_kings = {beam.hit_king for beam in self.game.fire_lasers(state.board) if beam.hit_king}
         if opponent in hit_kings:

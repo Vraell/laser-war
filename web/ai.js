@@ -1,10 +1,10 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.2";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.3";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
   maxDepth: 10,
-  rootLimit: 24,
-  branchLimits: [22, 12, 8],
+  rootLimit: 16,
+  branchLimits: [14, 10, 7],
 };
 const MATE_SCORE = 10_000;
 
@@ -22,17 +22,51 @@ function scoreForTop(game, state) {
   return state.turn === "top" ? game.evaluate(state) : -game.evaluate(state);
 }
 
+function signedSquare(value) {
+  return value * Math.abs(value);
+}
+
+function boundedRouteCost(costs, player) {
+  return Math.min(costs[player] ?? 12, 12);
+}
+
+/** Score attack tempo and per-laser control from one player's perspective. */
+export function routePressureScore(routeCosts, own, opponent) {
+  const attackCosts = routeCosts.map(
+    (costs) => boundedRouteCost(costs, opponent),
+  ).sort((a, b) => a - b);
+  const dangerCosts = routeCosts.map(
+    (costs) => boundedRouteCost(costs, own),
+  ).sort((a, b) => a - b);
+  const raceGap = dangerCosts[0] - attackCosts[0];
+  const controlGaps = routeCosts.map(
+    (costs) => boundedRouteCost(costs, own) - boundedRouteCost(costs, opponent),
+  );
+  return raceGap * 42
+    + (
+      dangerCosts.reduce((total, cost) => total + cost, 0)
+      - attackCosts.reduce((total, cost) => total + cost, 0)
+    ) * 12
+    + signedSquare(raceGap) * 18
+    + controlGaps.reduce((total, gap) => total + signedSquare(gap), 0) * 8;
+}
+
 /** Choose an Easy, Medium, or Hard move with bounded tactical reply analysis. */
 function standardMove(game, state, difficulty, random) {
   const started = performance.now();
-  const children = game.legalChildren(state);
-  if (!children.length) return { move: null, score: 0, depth: 0, nodes: 0, elapsed: 0 };
-  let nodes = children.length;
-  const ranked = children.map(({ move, state: child }) => ({
+  const candidateLimit = difficulty === "hard" ? 24 : difficulty === "medium" ? 10 : 8;
+  const approximate = game.legalChildren(state, false).map(({ move, state: child }) => ({
     move,
     state: child,
     score: scoreForTop(game, child),
   })).sort((left, right) => right.score - left.score);
+  const ranked = [];
+  for (const candidate of approximate) {
+    if (game.isLegalMove(state, candidate.move)) ranked.push(candidate);
+    if (ranked.length === candidateLimit) break;
+  }
+  if (!ranked.length) return { move: null, score: 0, depth: 0, nodes: 0, elapsed: 0 };
+  let nodes = ranked.length;
 
   if (difficulty === "easy") {
     const pool = ranked.slice(0, Math.min(8, ranked.length));
@@ -60,13 +94,16 @@ function standardMove(game, state, difficulty, random) {
     if (performance.now() >= deadline && analyzed.length >= 1) break;
     let worstReply = Infinity;
     let complete = true;
+    let legalReplies = 0;
     const replies = game.legalChildren(candidate.state, false);
     if (!replies.length) worstReply = 0;
-    for (const { state: replyState } of replies) {
+    for (const { move: reply, state: replyState } of replies) {
       if (performance.now() >= deadline && analyzed.length >= 1) {
         complete = false;
         break;
       }
+      if (!game.isLegalMove(candidate.state, reply)) continue;
+      legalReplies += 1;
       nodes += 1;
       worstReply = Math.min(worstReply, scoreForTop(game, replyState));
       if (replyState.winner === "bottom") {
@@ -75,6 +112,7 @@ function standardMove(game, state, difficulty, random) {
         break;
       }
     }
+    if (complete && legalReplies === 0) worstReply = 0;
     if (complete) {
       candidate.score = worstReply;
       analyzed.push(candidate);
@@ -102,7 +140,9 @@ function standardMove(game, state, difficulty, random) {
   if (!analyzed.length) {
     for (const candidate of ranked.slice(0, 3)) {
       const opponentWins = game.legalChildren(candidate.state, false)
-        .some(({ state: replyState }) => replyState.winner === "bottom");
+        .some(({ move: reply, state: replyState }) => (
+          replyState.winner === "bottom" && game.isLegalMove(candidate.state, reply)
+        ));
       if (opponentWins) candidate.score = -10000;
     }
     ranked.sort((left, right) => right.score - left.score);
@@ -132,25 +172,32 @@ export class UltraSearch {
     this.killers = new Map();
     this.cache = new Map();
     this.childrenCache = new Map();
+    this.strictChildren = new Set();
+    this.legalityCache = new Map();
   }
 
   /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
     const started = this.now();
-    this.deadline = started + this.profile.timeLimit;
+    this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
     const rootKey = stateKey(state);
-    const children = this.game.legalChildren(state);
+    const fastChildren = this.game.legalChildren(state, false);
+    this.childrenCache.set(rootKey, fastChildren);
+    const children = this.selectRootChildren(state);
     if (!children.length) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: 0 };
     this.childrenCache.set(rootKey, children);
+    this.strictChildren.add(rootKey);
 
-    let bestMove = children[0].move;
-    let bestScore = -Infinity;
-    let completedDepth = 0;
+    const fallback = this.orderedChildren(state, 0)[0];
+    let bestMove = fallback.move;
+    let bestScore = -this.strategicEvaluation(fallback.state);
+    let completedDepth = 1;
+    this.nodes = children.length;
     for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
       const iterationStarted = this.now();
       const configuredDeadline = this.deadline;
-      if (depth === 1) this.deadline = Infinity;
+      this.deadline = Math.min(this.deadline, timing.softDeadline);
       try {
         const result = this.searchRoot(state, depth);
         bestMove = result.move;
@@ -181,12 +228,28 @@ export class UltraSearch {
     };
   }
 
+  /** Rank approximate root moves, then retain only fully legal candidates. */
+  selectRootChildren(state) {
+    const key = stateKey(state);
+    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
+    const legality = this.legalityCache.get(key);
+    const selected = [];
+    for (const item of this.orderedChildren(state, 0)) {
+      const keyForMove = moveKey(item.move);
+      const legal = this.game.isLegalMove(state, item.move);
+      legality.set(keyForMove, legal);
+      if (legal) selected.push(item);
+      if (selected.length === this.profile.rootLimit) break;
+    }
+    return selected;
+  }
+
   /** Score and rank the root children at one completed depth. */
   searchRoot(state, depth) {
     let alpha = -Infinity;
     const beta = Infinity;
     let children = this.orderedChildren(state, 0);
-    if (depth >= 3) children = children.slice(0, this.profile.rootLimit);
+    children = children.slice(0, this.profile.rootLimit);
     const ranked = [];
     for (const { move, state: child } of children) {
       this.checkInterrupted();
@@ -209,19 +272,27 @@ export class UltraSearch {
     if (state.draw) return 0;
     if (depth <= 0) return this.stabilizedEvaluation(state, ply);
 
+    const originalAlpha = alpha;
+    const originalBeta = beta;
     const cacheKey = `${stateKey(state)}|${depth}`;
-    if (this.cache.has(cacheKey)) return this.cache.get(cacheKey);
+    if (this.cache.has(cacheKey)) {
+      const cached = this.cache.get(cacheKey);
+      if (cached.bound === "exact") return cached.value;
+      if (cached.bound === "lower") alpha = Math.max(alpha, cached.value);
+      else beta = Math.min(beta, cached.value);
+      if (alpha >= beta) return cached.value;
+    }
 
     let children = this.orderedChildren(state, ply);
     if (!children.length) return 0;
     const branchLimit = this.profile.branchLimits[
       Math.min(Math.max(0, ply - 1), this.profile.branchLimits.length - 1)
     ];
-    children = children.slice(0, branchLimit);
+    children = this.strictSubset(state, children, branchLimit);
+    if (!children.length) return 0;
 
     let value = -Infinity;
     let bestMove = null;
-    let cutoff = false;
     for (const { move, state: child } of children) {
       const score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
       if (score > value) {
@@ -230,7 +301,6 @@ export class UltraSearch {
       }
       alpha = Math.max(alpha, value);
       if (alpha >= beta) {
-        cutoff = true;
         const key = moveKey(move);
         this.history.set(key, (this.history.get(key) || 0) + depth * depth);
         const killers = this.killers.get(ply) || [];
@@ -243,7 +313,10 @@ export class UltraSearch {
       }
     }
     if (bestMove) this.ordering.set(stateKey(state), moveKey(bestMove));
-    if (!cutoff) this.cache.set(cacheKey, value);
+    let bound = "exact";
+    if (value <= originalAlpha) bound = "upper";
+    else if (value >= originalBeta) bound = "lower";
+    this.cache.set(cacheKey, { value, bound });
     return value;
   }
 
@@ -263,11 +336,30 @@ export class UltraSearch {
     ));
   }
 
+  /** Select the highest-ranked fully legal children up to one branch limit. */
+  strictSubset(state, children, limit) {
+    const key = stateKey(state);
+    if (this.strictChildren.has(key)) return children.slice(0, limit);
+    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
+    const legality = this.legalityCache.get(key);
+    const selected = [];
+    for (const item of children) {
+      this.checkInterrupted();
+      const keyForMove = moveKey(item.move);
+      if (!legality.has(keyForMove)) {
+        legality.set(keyForMove, this.game.isLegalMove(state, item.move));
+      }
+      if (legality.get(keyForMove)) selected.push(item);
+      if (selected.length === limit) break;
+    }
+    return selected;
+  }
+
   /** Rank a move for ordering without changing its position value. */
   movePriority(state, move, child, preferred, killers) {
     if (child.winner === state.turn) return 1_000_000;
     if (child.winner) return -1_000_000;
-    const terminal = child.draw ? 0 : -this.game.evaluate(child) * 1000;
+    const terminal = child.draw ? 0 : -this.strategicEvaluation(child) * 1000;
     let adjacentMirrors = 0;
     for (let row = Math.max(0, move.row - 1); row < Math.min(BOARD_SIZE, move.row + 2); row += 1) {
       for (let col = Math.max(0, move.col - 1); col < Math.min(BOARD_SIZE, move.col + 2); col += 1) {
@@ -288,15 +380,15 @@ export class UltraSearch {
     const score = this.strategicEvaluation(state);
     if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing)) return score;
 
-    const children = this.orderedChildren(state, ply);
-    if (!children.length) return 0;
     const opponent = state.turn === "top" ? "bottom" : "top";
+    const apparentSurvivals = this.orderedChildren(state, ply)
+      .filter(({ state: child }) => child.winner !== opponent);
+    const children = this.strictSubset(state, apparentSurvivals, 8);
     let best = -Infinity;
     for (const { state: child } of children) {
       this.checkInterrupted();
       this.nodes += 1;
       if (child.winner === state.turn) return MATE_SCORE - (ply + 1);
-      if (child.winner === opponent) continue;
       const candidate = child.draw ? 0 : -this.strategicEvaluation(child);
       best = Math.max(best, candidate);
     }
@@ -316,6 +408,9 @@ export class UltraSearch {
     const attackRoutes = reachable.filter((kings) => kings.has(opponent)).length;
     const exposedRoutes = reachable.filter((kings) => kings.has(own)).length;
     score += (attackRoutes - exposedRoutes) * 18;
+
+    const routeCosts = this.game.routeCostsByLaser(state.board);
+    score += routePressureScore(routeCosts, own, opponent);
 
     const hitKings = new Set(this.game.fireLasers(state.board).map((beam) => beam.hitKing).filter(Boolean));
     if (hitKings.has(opponent)) score += 240;

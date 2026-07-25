@@ -4,6 +4,7 @@ from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
+from heapq import heappop, heappush
 from math import inf
 
 BOARD_SIZE = 9
@@ -101,6 +102,10 @@ class Game:
             tuple[frozenset[str], frozenset[str]],
         ] = OrderedDict()
         self._joint_reachability_cache: OrderedDict[tuple[tuple[Cell, ...], ...], bool] = OrderedDict()
+        self._route_cost_cache: OrderedDict[
+            tuple[tuple[Cell, ...], ...],
+            tuple[dict[str, int], dict[str, int]],
+        ] = OrderedDict()
 
     def initial_state(self, turn: str = "bottom") -> State:
         """Create the symmetric opening position for a new match."""
@@ -355,6 +360,72 @@ class Game:
         if len(self._joint_reachability_cache) > 16_384:
             self._joint_reachability_cache.popitem(last=False)
         return available
+
+    def route_costs_by_laser(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        """Return minimum future-mirror counts from each laser to each king."""
+        cached = self._route_cost_cache.get(board)
+        if cached is not None:
+            self._route_cost_cache.move_to_end(board)
+            return cached
+
+        left, right = self.sources
+        costs = self._route_costs(board, left), self._route_costs(board, right)
+        self._route_cost_cache[board] = costs
+        if len(self._route_cost_cache) > 16_384:
+            self._route_cost_cache.popitem(last=False)
+        return costs
+
+    def _route_costs(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+        source: tuple[int, int, str],
+    ) -> dict[str, int]:
+        """Find shortest individual routes using weighted Dijkstra search."""
+        forbidden_turns = self.mirror_forbidden_squares(board)
+        distances = {source: 0}
+        frontier = [(0, source)]
+        costs: dict[str, int] = {}
+
+        while frontier and len(costs) < 2:
+            cost, (row, col, direction) = heappop(frontier)
+            if cost != distances[(row, col, direction)]:
+                continue
+            dr, dc = DIRS[direction]
+            next_row, next_col = row + dr, col + dc
+            if not self._in_bounds(next_row, next_col):
+                continue
+
+            cell = board[next_row][next_col]
+            if cell in (Cell.TOP_KING, Cell.BOTTOM_KING):
+                target = "top" if cell == Cell.TOP_KING else "bottom"
+                costs.setdefault(target, cost)
+                continue
+
+            options: list[tuple[str, int]] = []
+            if cell == Cell.MIRROR_SLASH:
+                options.append((SLASH[direction], cost))
+            elif cell == Cell.MIRROR_BACKSLASH:
+                options.append((BACKSLASH[direction], cost))
+            elif cell == Cell.EMPTY:
+                options.append((direction, cost))
+                if (next_row, next_col) not in forbidden_turns:
+                    options.extend((turned, cost + 1) for turned in self._turns(direction))
+            elif cell == Cell.SHIELD:
+                options.append((direction, cost + 1))
+                if (next_row, next_col) not in forbidden_turns:
+                    options.extend((turned, cost + 2) for turned in self._turns(direction))
+
+            for next_direction, next_cost in options:
+                next_state = (next_row, next_col, next_direction)
+                if next_cost >= distances.get(next_state, 1_000_000):
+                    continue
+                distances[next_state] = next_cost
+                heappush(frontier, (next_cost, next_state))
+
+        return costs
 
     def _joint_pairing_available(
         self,

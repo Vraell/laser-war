@@ -95,6 +95,10 @@ class EngineTests(unittest.TestCase):
             game.reachable_kings_by_laser(state.board),
             (frozenset({"top", "bottom"}), frozenset({"top", "bottom"})),
         )
+        self.assertEqual(
+            game.route_costs_by_laser(state.board),
+            ({"top": 3, "bottom": 3}, {"top": 3, "bottom": 3}),
+        )
 
     def test_apply_move_places_mirror_and_changes_turn(self):
         game = Game()
