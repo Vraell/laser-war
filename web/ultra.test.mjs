@@ -37,7 +37,7 @@ const setup = [
 ];
 
 for (const [row, col, mirror] of setup) {
-  state = game.resolveMove(state, { row, col, mirror }).state;
+  state = game.resolveMove(state, { row, col, mirror }, false, false).state;
 }
 
 const search = new UltraSearch(game, () => 0, TEST_PROFILE);
@@ -57,7 +57,7 @@ for (const [row, col, mirror] of fixture.moves.slice(0, -1)) {
     row: row - 1,
     col: col - 1,
     mirror,
-  }).state;
+  }, false, false).state;
 }
 const horizonSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const horizonScore = horizonSearch.stabilizedEvaluation(forcedState, 4);

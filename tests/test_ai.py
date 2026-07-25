@@ -85,7 +85,12 @@ class AITests(unittest.TestCase):
             (4, 3, "/"),
         ]
         for row, col, mirror in setup:
-            state = game.resolve_move(state, Move(row, col, Cell(mirror))).state
+            state = game.resolve_move(
+                state,
+                Move(row, col, Cell(mirror)),
+                check_no_legal_moves=False,
+                check_joint_paths=False,
+            ).state
 
         profile = DIFFICULTIES["ultra"]
         DIFFICULTIES["ultra"] = replace(profile, label="Ultra Test", time_limit=30.0, max_depth=4)

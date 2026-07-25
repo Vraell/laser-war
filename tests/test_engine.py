@@ -6,6 +6,33 @@ from laser_war.engine import Cell, Game, Move, State
 
 
 class EngineTests(unittest.TestCase):
+    def test_shared_route_validator_rejects_reported_closed_position(self):
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "incompatible_28_move_log.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        game = Game()
+        state = game.initial_state()
+        for row, col, mirror in fixture["moves"][:25]:
+            state = game.resolve_move(state, Move(row - 1, col - 1, Cell(mirror))).state
+
+        row, col, mirror = fixture["moves"][25]
+        closing_move = Move(row - 1, col - 1, Cell(mirror))
+        legacy_outcome = game.resolve_move(
+            state,
+            closing_move,
+            check_no_legal_moves=False,
+            check_joint_paths=False,
+        )
+
+        self.assertEqual(
+            game.reachable_kings_by_laser(legacy_outcome.state.board),
+            (frozenset({"top", "bottom"}), frozenset({"top", "bottom"})),
+        )
+        self.assertFalse(game.joint_paths_available(legacy_outcome.state.board))
+        self.assertEqual(game.illegal_move_reason(state, closing_move), "incompatible_paths")
+
     def test_reported_forced_loss_still_enforces_terminal_path_rules(self):
         fixture = json.loads(
             (Path(__file__).parent / "fixtures" / "forced_loss_40_move_log.json").read_text(encoding="utf-8")

@@ -1,5 +1,6 @@
 export const BOARD_SIZE = 9;
 export const MIDDLE_ROW = 4;
+const MAX_ROUTE_MIRRORS = 5;
 
 export const Cell = Object.freeze({
   EMPTY: ".",
@@ -20,6 +21,7 @@ const DIRS = {
 const SLASH = { N: "E", E: "N", S: "W", W: "S" };
 const BACKSLASH = { N: "W", W: "N", S: "E", E: "S" };
 const TURNS = { top: "bottom", bottom: "top" };
+const DIRECTION_INDEX = { N: 0, E: 1, S: 2, W: 3 };
 
 function key(row, col) {
   return `${row},${col}`;
@@ -54,6 +56,7 @@ export class Game {
     ];
     this.laserEntrySquares = new Set([key(MIDDLE_ROW, 0), key(MIDDLE_ROW, BOARD_SIZE - 1)]);
     this.reachabilityCache = new Map();
+    this.jointReachabilityCache = new Map();
   }
 
   /** Create the symmetric opening position for a new match. */
@@ -75,11 +78,11 @@ export class Game {
   }
 
   /** Return legal moves paired with their fully resolved child states. */
-  legalChildren(state) {
+  legalChildren(state, checkJointPaths = true) {
     const children = [];
     for (const move of this.pseudoMoves(state)) {
       try {
-        const child = this.resolveMove(state, move, false).state;
+        const child = this.resolveMove(state, move, false, checkJointPaths).state;
         children.push({ move, state: child });
       } catch {
         // Pseudo moves still need king-path and laser-path validation.
@@ -109,7 +112,7 @@ export class Game {
   }
 
   /** Place a mirror, fire both lasers, apply damage, and validate paths. */
-  resolveMove(state, move, checkNoLegalMoves = true) {
+  resolveMove(state, move, checkNoLegalMoves = true, checkJointPaths = true) {
     if (state.winner || state.draw) throw illegalMove("gameOver", "The game is already over.");
     if (![Cell.SLASH, Cell.BACKSLASH].includes(move.mirror)) {
       throw illegalMove("invalidMirror", "A move must place a mirror.");
@@ -159,6 +162,12 @@ export class Game {
     }
     if (!reachable.some((kings) => kings.has(opponent))) {
       throw illegalMove("opponentKingUnreachable", "That move blocks every possible laser path to the opposing king.");
+    }
+    if (checkJointPaths && !this.jointPathsAvailable(damaged)) {
+      throw illegalMove(
+        "incompatiblePaths",
+        "No compatible future mirror layout keeps both kings reachable.",
+      );
     }
 
     let nextState;
@@ -275,6 +284,117 @@ export class Game {
       this.reachabilityCache.delete(this.reachabilityCache.keys().next().value);
     }
     return reachable;
+  }
+
+  /** Check whether both lasers can reach opposite kings on one future layout. */
+  jointPathsAvailable(board) {
+    const boardKey = board.map((row) => row.join("")).join("");
+    if (this.jointReachabilityCache.has(boardKey)) return this.jointReachabilityCache.get(boardKey);
+    const available = [
+      ["top", "bottom"],
+      ["bottom", "top"],
+    ].some((targets) => this.jointPairingAvailable(board, targets));
+    this.jointReachabilityCache.set(boardKey, available);
+    if (this.jointReachabilityCache.size > 4096) {
+      this.jointReachabilityCache.delete(this.jointReachabilityCache.keys().next().value);
+    }
+    return available;
+  }
+
+  /** Find compatible route assignments for one left/right king pairing. */
+  jointPairingAvailable(board, targets) {
+    const forbiddenTurns = this.mirrorForbiddenSquares(board);
+    const leftRoutes = this.compatibleRoutes(
+      board,
+      forbiddenTurns,
+      this.sources[0],
+      targets[0],
+      0n,
+      0n,
+      0n,
+      0,
+      0n,
+    );
+    for (const [empty, slash, backslash, mirrorCount] of leftRoutes) {
+      const rightRoutes = this.compatibleRoutes(
+        board,
+        forbiddenTurns,
+        this.sources[1],
+        targets[1],
+        empty,
+        slash,
+        backslash,
+        mirrorCount,
+        0n,
+      );
+      if (!rightRoutes.next().done) return true;
+    }
+    return false;
+  }
+
+  /** Yield shared assignments that route one laser to its assigned king. */
+  *compatibleRoutes(
+    board,
+    forbiddenTurns,
+    source,
+    target,
+    empty,
+    slash,
+    backslash,
+    mirrorCount,
+    visited,
+  ) {
+    const [row, col, direction] = source;
+    const [dr, dc] = DIRS[direction];
+    const nextRow = row + dr;
+    const nextCol = col + dc;
+    if (!this.inBounds(nextRow, nextCol)) return;
+
+    const visitIndex = ((nextRow * BOARD_SIZE + nextCol) * 4) + DIRECTION_INDEX[direction];
+    const visitBit = 1n << BigInt(visitIndex);
+    if (visited & visitBit) return;
+    const nextVisited = visited | visitBit;
+
+    const cell = board[nextRow][nextCol];
+    if (cell === Cell.TOP_KING || cell === Cell.BOTTOM_KING) {
+      const hit = cell === Cell.TOP_KING ? "top" : "bottom";
+      if (hit === target) yield [empty, slash, backslash, mirrorCount];
+      return;
+    }
+
+    const squareBit = 1n << BigInt(nextRow * BOARD_SIZE + nextCol);
+    const options = [];
+    if (cell === Cell.SLASH) {
+      options.push([SLASH[direction], empty, slash, backslash, mirrorCount]);
+    } else if (cell === Cell.BACKSLASH) {
+      options.push([BACKSLASH[direction], empty, slash, backslash, mirrorCount]);
+    } else if (empty & squareBit) {
+      options.push([direction, empty, slash, backslash, mirrorCount]);
+    } else if (slash & squareBit) {
+      options.push([SLASH[direction], empty, slash, backslash, mirrorCount]);
+    } else if (backslash & squareBit) {
+      options.push([BACKSLASH[direction], empty, slash, backslash, mirrorCount]);
+    } else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
+      options.push([direction, empty | squareBit, slash, backslash, mirrorCount]);
+      if (!forbiddenTurns.has(key(nextRow, nextCol)) && mirrorCount < MAX_ROUTE_MIRRORS) {
+        options.push([SLASH[direction], empty, slash | squareBit, backslash, mirrorCount + 1]);
+        options.push([BACKSLASH[direction], empty, slash, backslash | squareBit, mirrorCount + 1]);
+      }
+    }
+
+    for (const [nextDirection, nextEmpty, nextSlash, nextBackslash, nextCount] of options) {
+      yield* this.compatibleRoutes(
+        board,
+        forbiddenTurns,
+        [nextRow, nextCol, nextDirection],
+        target,
+        nextEmpty,
+        nextSlash,
+        nextBackslash,
+        nextCount,
+        nextVisited,
+      );
+    }
   }
 
   /** Explore all legal future beam turns from one laser source. */

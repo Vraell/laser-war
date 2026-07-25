@@ -202,7 +202,7 @@ class ComputerAI:
         """Return legal children ordered by tactical and historical priority."""
         children = self.children_cache.get(state)
         if children is None:
-            children = self.game.legal_children(state)
+            children = self.game.legal_children(state, check_joint_paths=False)
             if moves is not None:
                 legal = set(moves)
                 children = [item for item in children if item[0] in legal]

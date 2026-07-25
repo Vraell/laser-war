@@ -11,7 +11,7 @@ from .engine import Cell, Game, Move, MoveOutcome, State
 from .i18n import translate
 from .storage import write_json_atomic
 
-SAVE_VERSION = 2
+SAVE_VERSION = 3
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from math import inf
 
 BOARD_SIZE = 9
 MIDDLE_ROW = 4
+MAX_ROUTE_MIRRORS = 5
 LASER_ENTRY_SQUARES = frozenset({(MIDDLE_ROW, 0), (MIDDLE_ROW, BOARD_SIZE - 1)})
 
 DIRS = {
@@ -35,6 +36,7 @@ TURNS = {
     "top": "bottom",
     "bottom": "top",
 }
+DIRECTION_INDEX = {direction: index for index, direction in enumerate(DIRS)}
 
 
 class Cell(str, Enum):
@@ -97,6 +99,7 @@ class Game:
             tuple[tuple[Cell, ...], ...],
             tuple[frozenset[str], frozenset[str]],
         ] = OrderedDict()
+        self._joint_reachability_cache: OrderedDict[tuple[tuple[Cell, ...], ...], bool] = OrderedDict()
 
     def initial_state(self, turn: str = "bottom") -> State:
         """Create the symmetric opening position for a new match."""
@@ -115,12 +118,17 @@ class Game:
     def legal_moves(self, state: State) -> list[Move]:
         return [move for move, _child in self.legal_children(state)]
 
-    def legal_children(self, state: State) -> list[tuple[Move, State]]:
+    def legal_children(self, state: State, *, check_joint_paths: bool = True) -> list[tuple[Move, State]]:
         """Return each legal move paired with its fully resolved child state."""
         children: list[tuple[Move, State]] = []
         for move in self._pseudo_moves(state):
             try:
-                child = self.resolve_move(state, move, check_no_legal_moves=False).state
+                child = self.resolve_move(
+                    state,
+                    move,
+                    check_no_legal_moves=False,
+                    check_joint_paths=check_joint_paths,
+                ).state
             except ValueError:
                 continue
             children.append((move, child))
@@ -147,7 +155,14 @@ class Game:
     def apply_move(self, state: State, move: Move) -> State:
         return self.resolve_move(state, move).state
 
-    def resolve_move(self, state: State, move: Move, check_no_legal_moves: bool = True) -> MoveOutcome:
+    def resolve_move(
+        self,
+        state: State,
+        move: Move,
+        check_no_legal_moves: bool = True,
+        *,
+        check_joint_paths: bool = True,
+    ) -> MoveOutcome:
         """Place a mirror, fire both lasers, apply damage, and validate paths."""
         if state.winner or state.draw:
             raise IllegalMoveError("game_over", "The game is already over.")
@@ -199,6 +214,11 @@ class Game:
             raise IllegalMoveError(
                 "opponent_king_unreachable",
                 "Illegal move: it fully blocks all possible laser paths to the opponent's king.",
+            )
+        if check_joint_paths and not self.joint_paths_available(next_board):
+            raise IllegalMoveError(
+                "incompatible_paths",
+                "Illegal move: no compatible future mirror layout keeps both kings reachable.",
             )
 
         if own in hit_kings and opponent in hit_kings:
@@ -320,6 +340,123 @@ class Game:
         if len(self._reachability_cache) > 16_384:
             self._reachability_cache.popitem(last=False)
         return reachable
+
+    def joint_paths_available(self, board: tuple[tuple[Cell, ...], ...]) -> bool:
+        """Check whether both lasers can reach opposite kings on one future layout."""
+        cached = self._joint_reachability_cache.get(board)
+        if cached is not None:
+            self._joint_reachability_cache.move_to_end(board)
+            return cached
+
+        pairings = (("top", "bottom"), ("bottom", "top"))
+        available = any(self._joint_pairing_available(board, targets) for targets in pairings)
+        self._joint_reachability_cache[board] = available
+        if len(self._joint_reachability_cache) > 16_384:
+            self._joint_reachability_cache.popitem(last=False)
+        return available
+
+    def _joint_pairing_available(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+        targets: tuple[str, str],
+    ) -> bool:
+        """Find compatible route assignments for one left/right king pairing."""
+        left, right = self.sources
+        forbidden_turns = self.mirror_forbidden_squares(board)
+        left_routes = self._compatible_routes(
+            board,
+            forbidden_turns,
+            left,
+            targets[0],
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        for empty, slash, backslash, mirror_count in left_routes:
+            right_routes = self._compatible_routes(
+                board,
+                forbidden_turns,
+                right,
+                targets[1],
+                empty,
+                slash,
+                backslash,
+                mirror_count,
+                0,
+            )
+            if next(right_routes, None) is not None:
+                return True
+        return False
+
+    def _compatible_routes(
+        self,
+        board: tuple[tuple[Cell, ...], ...],
+        forbidden_turns: frozenset[tuple[int, int]],
+        source: tuple[int, int, str],
+        target: str,
+        empty: int,
+        slash: int,
+        backslash: int,
+        mirror_count: int,
+        visited: int,
+    ) -> Iterable[tuple[int, int, int, int]]:
+        """Yield shared mirror assignments that route one laser to its target."""
+        row, col, direction = source
+        dr, dc = DIRS[direction]
+        next_row, next_col = row + dr, col + dc
+        if not self._in_bounds(next_row, next_col):
+            return
+
+        visit_index = ((next_row * self.size + next_col) * 4) + DIRECTION_INDEX[direction]
+        visit_bit = 1 << visit_index
+        if visited & visit_bit:
+            return
+        visited |= visit_bit
+
+        cell = board[next_row][next_col]
+        if cell in (Cell.TOP_KING, Cell.BOTTOM_KING):
+            hit = "top" if cell == Cell.TOP_KING else "bottom"
+            if hit == target:
+                yield empty, slash, backslash, mirror_count
+            return
+
+        square_bit = 1 << (next_row * self.size + next_col)
+        options: list[tuple[str, int, int, int, int]] = []
+        if cell == Cell.MIRROR_SLASH:
+            options.append((SLASH[direction], empty, slash, backslash, mirror_count))
+        elif cell == Cell.MIRROR_BACKSLASH:
+            options.append((BACKSLASH[direction], empty, slash, backslash, mirror_count))
+        elif empty & square_bit:
+            options.append((direction, empty, slash, backslash, mirror_count))
+        elif slash & square_bit:
+            options.append((SLASH[direction], empty, slash, backslash, mirror_count))
+        elif backslash & square_bit:
+            options.append((BACKSLASH[direction], empty, slash, backslash, mirror_count))
+        elif cell in (Cell.EMPTY, Cell.SHIELD):
+            options.append((direction, empty | square_bit, slash, backslash, mirror_count))
+            can_turn = (next_row, next_col) not in forbidden_turns
+            if can_turn and mirror_count < MAX_ROUTE_MIRRORS:
+                options.append(
+                    (SLASH[direction], empty, slash | square_bit, backslash, mirror_count + 1)
+                )
+                options.append(
+                    (BACKSLASH[direction], empty, slash, backslash | square_bit, mirror_count + 1)
+                )
+
+        for next_direction, next_empty, next_slash, next_backslash, next_count in options:
+            yield from self._compatible_routes(
+                board,
+                forbidden_turns,
+                (next_row, next_col, next_direction),
+                target,
+                next_empty,
+                next_slash,
+                next_backslash,
+                next_count,
+                visited,
+            )
 
     def _reachable_kings(
         self,

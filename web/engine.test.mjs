@@ -66,7 +66,7 @@ const strandingSetup = [
   [3, 6, "\\"], [2, 6, "/"], [2, 7, "/"], [1, 7, "/"], [1, 8, "/"], [0, 6, "\\"], [0, 8, "\\"],
 ];
 for (const [row, col, mirror] of strandingSetup) {
-  strandingState = game.resolveMove(strandingState, { row, col, mirror }).state;
+  strandingState = game.resolveMove(strandingState, { row, col, mirror }, false, false).state;
 }
 assert.equal(game.isLegalMove(strandingState, { row: 0, col: 7, mirror: "\\" }), false);
 assert.equal(game.illegalMoveReason(strandingState, { row: 0, col: 7, mirror: "\\" }), "rightLaserStranded");
@@ -129,7 +129,12 @@ const forcedLossFixture = JSON.parse(readFileSync(
 ));
 let forcedLossState = game.initialState();
 for (const [row, col, mirror] of forcedLossFixture.moves.slice(0, -1)) {
-  forcedLossState = game.resolveMove(forcedLossState, { row: row - 1, col: col - 1, mirror }).state;
+  forcedLossState = game.resolveMove(
+    forcedLossState,
+    { row: row - 1, col: col - 1, mirror },
+    false,
+    false,
+  ).state;
 }
 const [reportedRow, reportedCol, reportedMirror] = forcedLossFixture.moves.at(-1);
 const reportedMove = { row: reportedRow - 1, col: reportedCol - 1, mirror: reportedMirror };
@@ -137,5 +142,26 @@ assert.equal(game.illegalMoveReason(forcedLossState, reportedMove), "rightLaserS
 const forcedChoice = chooseComputerMove(game, forcedLossState, "hard");
 assert.equal(game.isLegalMove(forcedLossState, forcedChoice.move), true);
 assert.equal(game.resolveMove(forcedLossState, forcedChoice.move).state.winner, "bottom");
+
+const incompatibleFixture = JSON.parse(readFileSync(
+  new URL("../tests/fixtures/incompatible_28_move_log.json", import.meta.url),
+  "utf8",
+));
+let incompatibleState = game.initialState();
+for (const [row, col, mirror] of incompatibleFixture.moves.slice(0, 25)) {
+  incompatibleState = game.resolveMove(
+    incompatibleState,
+    { row: row - 1, col: col - 1, mirror },
+  ).state;
+}
+const [closingRow, closingCol, closingMirror] = incompatibleFixture.moves[25];
+const closingMove = { row: closingRow - 1, col: closingCol - 1, mirror: closingMirror };
+const legacyOutcome = game.resolveMove(incompatibleState, closingMove, false, false);
+assert.deepEqual(
+  game.reachableKingsByLaser(legacyOutcome.state.board).map((kings) => [...kings].sort()),
+  [["bottom", "top"], ["bottom", "top"]],
+);
+assert.equal(game.jointPathsAvailable(legacyOutcome.state.board), false);
+assert.equal(game.illegalMoveReason(incompatibleState, closingMove), "incompatiblePaths");
 
 console.log("Native web engine checks passed.");

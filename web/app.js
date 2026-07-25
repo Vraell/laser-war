@@ -1,13 +1,14 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.10.2";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.0";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.10.2";
-import { loadProgress, recordResult, saveProgress } from "./progress.js?v=0.10.2";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.10.2";
-import { beamPoints } from "./beam.js?v=0.10.2";
+} from "./save.js?v=0.11.0";
+import { loadProgress, recordResult, saveProgress } from "./progress.js?v=0.11.0";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.0";
+import { beamPoints } from "./beam.js?v=0.11.0";
+import { drawDetailKey } from "./result.js?v=0.11.0";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -208,7 +209,7 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.10.2", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.11.0", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
     finishComputerTurn(data.result);
@@ -490,7 +491,10 @@ function showResult(playSound = true) {
   if (session.state.draw) {
     elements.resultTitle.textContent = t("draw").toUpperCase();
     elements.resultTitle.style.color = "var(--ink)";
-    elements.resultDetail.textContent = t("drawDetail", { count: moveCount(session.history.length) });
+    elements.resultDetail.textContent = t(
+      drawDetailKey(lastOutcome),
+      { count: moveCount(session.history.length) },
+    );
   } else if (session.mode === "computer") {
     const victory = session.state.winner === "bottom";
     elements.resultTitle.textContent = victory ? t("victory") : t("defeat");
@@ -599,7 +603,7 @@ function saveGame() {
 /** Return whether browser storage contains a supported active save. */
 function hasSave() {
   try {
-    return [1, SAVE_VERSION].includes(JSON.parse(localStorage.getItem(SAVE_KEY))?.version);
+    return JSON.parse(localStorage.getItem(SAVE_KEY))?.version === SAVE_VERSION;
   } catch {
     return false;
   }
@@ -607,7 +611,7 @@ function hasSave() {
 
 /** Rebuild a saved session by replaying moves through current rules. */
 function sessionFromSave(data) {
-  if (![1, SAVE_VERSION].includes(data?.version)) throw new Error("Unsupported save.");
+  if (data?.version !== SAVE_VERSION) throw new Error("Unsupported save.");
   const restored = createSession(
     data.mode,
     data.difficulty,
@@ -691,7 +695,7 @@ function updateProgressUI() {
 function migrateStoredSave() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (![1, SAVE_VERSION].includes(data?.version)) return;
+    if (data?.version !== SAVE_VERSION) return;
     const restored = sessionFromSave(data);
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(restored)));
   } catch {

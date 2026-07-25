@@ -96,7 +96,7 @@ class SessionTests(unittest.TestCase):
     def test_save_from_previous_rules_version_is_rejected(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "save.json"
-            path.write_text(json.dumps({"version": 1, "moves": []}), encoding="utf-8")
+            path.write_text(json.dumps({"version": 2, "moves": []}), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "unsupported version"):
                 GameSession.load(path)

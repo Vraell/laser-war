@@ -407,7 +407,7 @@ class LaserWarGame:
         ]
         self._add_buttons(language_buttons, mouse)
 
-        version = self.fonts["tiny"].render("v0.8", True, color("muted"))
+        version = self.fonts["tiny"].render("v0.9", True, color("muted"))
         self.canvas.blit(version, (448, 757))
 
     def _draw_rules(self, mouse: tuple[int, int]) -> None:
@@ -754,7 +754,16 @@ class LaserWarGame:
             accent = color("amber" if winner == "bottom" else "blue")
         text = self.fonts["title"].render(heading, True, accent)
         self.canvas.blit(text, text.get_rect(center=(640, 258)))
-        if self.ultra_unlocked_this_match:
+        if self.session.state.draw:
+            simultaneous_hit = bool(
+                self.session.history
+                and len(self.session.history[-1].outcome.hit_kings) == 2
+            )
+            detail = self._t(
+                "draw_hit_detail" if simultaneous_hit else "draw_stalemate_detail",
+                count=self._move_count(len(self.session.history)),
+            )
+        elif self.ultra_unlocked_this_match:
             detail = self._t("ultra_unlocked")
         else:
             detail = self._t(

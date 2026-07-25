@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.10.2";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.0";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
@@ -60,7 +60,7 @@ function standardMove(game, state, difficulty, random) {
     if (performance.now() >= deadline && analyzed.length >= 1) break;
     let worstReply = Infinity;
     let complete = true;
-    const replies = game.legalChildren(candidate.state);
+    const replies = game.legalChildren(candidate.state, false);
     if (!replies.length) worstReply = 0;
     for (const { state: replyState } of replies) {
       if (performance.now() >= deadline && analyzed.length >= 1) {
@@ -101,7 +101,7 @@ function standardMove(game, state, difficulty, random) {
 
   if (!analyzed.length) {
     for (const candidate of ranked.slice(0, 3)) {
-      const opponentWins = game.legalChildren(candidate.state)
+      const opponentWins = game.legalChildren(candidate.state, false)
         .some(({ state: replyState }) => replyState.winner === "bottom");
       if (opponentWins) candidate.score = -10000;
     }
@@ -252,7 +252,7 @@ export class UltraSearch {
     const key = stateKey(state);
     let children = this.childrenCache.get(key);
     if (!children) {
-      children = this.game.legalChildren(state);
+      children = this.game.legalChildren(state, false);
       this.childrenCache.set(key, children);
     }
     const preferred = this.ordering.get(key);

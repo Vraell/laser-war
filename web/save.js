@@ -1,4 +1,4 @@
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** Create a stable identifier for a new browser match. */
 export function createMatchId() {
