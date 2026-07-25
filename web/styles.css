@@ -121,6 +121,10 @@ button.primary {
   gap: 8px;
 }
 
+.menu-utilities .auto-log {
+  grid-column: 1 / -1;
+}
+
 .menu-actions button {
   min-height: 52px;
   padding: 0 18px;
@@ -542,9 +546,24 @@ button.quiet {
   justify-content: space-between;
 }
 
+.log-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .section-heading span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.log-export {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 17px;
+  line-height: 1;
 }
 
 #match-log {

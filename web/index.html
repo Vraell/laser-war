@@ -29,6 +29,7 @@
         <div class="menu-utilities">
           <button class="quiet" id="show-rules">Rules</button>
           <button class="quiet" id="export-logs">Export Match Logs</button>
+          <button class="quiet auto-log" id="enable-auto-log">Enable Auto Log File</button>
         </div>
       </div>
       <span class="version">v0.4 web</span>
@@ -84,7 +85,10 @@
           <section class="log-band">
             <div class="section-heading">
               <p class="eyebrow">MATCH LOG</p>
-              <span id="move-count">0 moves</span>
+              <div class="log-summary">
+                <span id="move-count">0 moves</span>
+                <button class="log-export" id="export-logs-game" aria-label="Download match logs" title="Download match logs">↓</button>
+              </div>
             </div>
             <ol id="match-log"><li class="empty-log">Awaiting the first move.</li></ol>
           </section>

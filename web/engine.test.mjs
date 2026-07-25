@@ -142,4 +142,21 @@ const tacticalChoice = chooseComputerMove(
 );
 assert.equal(tacticalChoice.move.index, 0);
 
+let selfKillState = game.initialState();
+const selfKillSetup = [
+  [4, 1, "/"],
+  [8, 1, "\\"],
+  [4, 7, "\\"],
+  [0, 0, "/"],
+  [0, 7, "\\"],
+];
+for (const [row, col, mirror] of selfKillSetup) {
+  selfKillState = game.resolveMove(selfKillState, { row, col, mirror }).state;
+}
+const selfKill = { row: 0, col: 1, mirror: "/" };
+const correctedChoice = chooseComputerMove(game, selfKillState, "hard");
+const correctedOutcome = game.resolveMove(selfKillState, correctedChoice.move, false);
+assert.notDeepEqual(correctedChoice.move, selfKill);
+assert.notEqual(correctedOutcome.state.winner, "bottom");
+
 console.log("Native web engine checks passed.");

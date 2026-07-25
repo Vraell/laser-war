@@ -332,6 +332,10 @@ export function chooseComputerMove(game, state, difficulty = "medium") {
     if (candidate.state.winner === "top") {
       return { move: candidate.move, score: 10000, nodes, elapsed: performance.now() - started };
     }
+    if (candidate.state.winner || candidate.state.draw) {
+      analyzed.push(candidate);
+      continue;
+    }
     if (performance.now() >= deadline && analyzed.length >= 1) break;
     let worstReply = Infinity;
     let complete = true;

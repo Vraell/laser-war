@@ -8,6 +8,10 @@ Play at [vraell.github.io/laser-war](https://vraell.github.io/laser-war/). No in
 is required. Every move is saved immediately in that browser's persistent match archive. Use **Export Match
 Logs** on the main menu to download the complete JSON history.
 
+On Chromium desktop browsers, **Enable Auto Log File** grants one file permission and keeps
+`laser-war-live-match-logs.json` updated after every subsequent move. Other browsers continue to use the
+browser archive and manual export.
+
 ## Play
 
 Requires Python 3.10 or newer.

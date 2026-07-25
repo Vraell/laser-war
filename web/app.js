@@ -8,6 +8,12 @@ import {
   loadMatchArchive,
   upsertMatchRecord,
 } from "./archive.js";
+import {
+  enableFileMirror,
+  fileMirrorEnabled,
+  fileMirrorSupported,
+  queueFileMirror,
+} from "./file_mirror.js";
 
 const SAVE_KEY = "laser-war.web.v1";
 const game = new Game();
@@ -25,6 +31,8 @@ const elements = {
   aiDetail: document.querySelector("#ai-detail"),
   continueButton: document.querySelector("#continue-game"),
   exportLogs: document.querySelector("#export-logs"),
+  exportLogsGame: document.querySelector("#export-logs-game"),
+  enableAutoLog: document.querySelector("#enable-auto-log"),
   slash: document.querySelector("#select-slash"),
   backslash: document.querySelector("#select-backslash"),
   pauseOverlay: document.querySelector("#pause-overlay"),
@@ -413,6 +421,7 @@ function saveGame(status = "active") {
     if (session.history.length) {
       upsertMatchRecord(localStorage, buildMatchRecord(session, status));
     }
+    queueFileMirror(loadMatchArchive(localStorage));
     elements.continueButton.disabled = false;
     updateExportButton();
   } catch {
@@ -513,7 +522,9 @@ function migrateStoredSaveToArchive() {
 }
 
 function updateExportButton() {
-  elements.exportLogs.disabled = loadMatchArchive(localStorage).matches.length === 0;
+  const disabled = loadMatchArchive(localStorage).matches.length === 0;
+  elements.exportLogs.disabled = disabled;
+  elements.exportLogsGame.disabled = disabled;
 }
 
 function exportMatchLogs() {
@@ -532,6 +543,28 @@ function exportMatchLogs() {
   link.download = `laser-war-match-logs-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function updateAutoLogButton() {
+  if (!fileMirrorSupported()) {
+    elements.enableAutoLog.disabled = true;
+    elements.enableAutoLog.textContent = "Auto Log Unavailable";
+    elements.enableAutoLog.title = "Use a Chromium desktop browser to mirror logs automatically.";
+    return;
+  }
+  const enabled = await fileMirrorEnabled();
+  elements.enableAutoLog.disabled = false;
+  elements.enableAutoLog.textContent = enabled ? "Auto Log File Enabled" : "Enable Auto Log File";
+}
+
+async function enableAutoLogFile() {
+  try {
+    const enabled = await enableFileMirror(loadMatchArchive(localStorage));
+    await updateAutoLogButton();
+    showToast(enabled ? "Automatic log file enabled." : "Automatic log file was not enabled.");
+  } catch (error) {
+    if (error.name !== "AbortError") showToast("Could not enable the automatic log file.");
+  }
 }
 
 function showToast(message) {
@@ -614,6 +647,8 @@ document.querySelector("#play-again").addEventListener("click", restart);
 document.querySelector("#result-menu").addEventListener("click", returnToMenu);
 document.querySelector("#show-rules").addEventListener("click", () => elements.rules.showModal());
 elements.exportLogs.addEventListener("click", exportMatchLogs);
+elements.exportLogsGame.addEventListener("click", exportMatchLogs);
+elements.enableAutoLog.addEventListener("click", enableAutoLogFile);
 elements.sound.addEventListener("click", () => audio.toggle());
 
 document.addEventListener("keydown", (event) => {
@@ -629,6 +664,7 @@ document.addEventListener("keydown", (event) => {
 migrateStoredSaveToArchive();
 elements.continueButton.disabled = !hasSave();
 updateExportButton();
+updateAutoLogButton();
 window.__laserWar = {
   game,
   startGame,
