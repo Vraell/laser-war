@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.5";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.6";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
@@ -161,12 +161,15 @@ function standardMove(game, state, difficulty, random) {
 
 export class UltraSearch {
   /** Initialize caches and timing for one Ultra search. */
-  constructor(game, now, profile = ULTRA_PROFILE) {
+  constructor(game, now, profile = ULTRA_PROFILE, onProgress = () => {}) {
     this.game = game;
     this.now = now;
     this.profile = profile;
+    this.onProgress = onProgress;
     this.deadline = Infinity;
     this.nodes = 0;
+    this.activeDepth = 0;
+    this.lastProgressAt = -Infinity;
     this.ordering = new Map();
     this.history = new Map();
     this.killers = new Map();
@@ -186,6 +189,7 @@ export class UltraSearch {
     this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
     const rootKey = this.keyForState(state);
+    this.reportProgress("preparing", true);
     const fastChildren = this.game.legalChildren(state, false);
     this.childrenCache.set(rootKey, fastChildren);
     const children = this.selectRootChildren(state);
@@ -199,6 +203,8 @@ export class UltraSearch {
     let completedDepth = 1;
     this.nodes = children.length;
     for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
+      this.activeDepth = depth;
+      this.reportProgress("searching", true);
       const iterationStarted = this.now();
       const configuredDeadline = this.deadline;
       this.deadline = Math.min(this.deadline, timing.softDeadline);
@@ -208,6 +214,7 @@ export class UltraSearch {
         bestScore = result.score;
         completedDepth = depth;
         this.ordering.set(rootKey, moveKey(bestMove));
+        this.reportProgress("searching", true);
         const now = this.now();
         const iterationElapsed = now - iterationStarted;
         if (Math.abs(bestScore) >= MATE_SCORE - 100) break;
@@ -546,7 +553,20 @@ export class UltraSearch {
 
   /** Abort once the configured search deadline is reached. */
   checkInterrupted() {
-    if (this.now() >= this.deadline) throw new SearchInterrupted();
+    const now = this.now();
+    if (now >= this.deadline) throw new SearchInterrupted();
+    if (now - this.lastProgressAt >= 250) this.reportProgress("searching", false, now);
+  }
+
+  /** Publish throttled search metrics without coupling the engine to the interface. */
+  reportProgress(phase, force = false, now = this.now()) {
+    if (!force && now - this.lastProgressAt < 250) return;
+    this.lastProgressAt = now;
+    this.onProgress({
+      phase,
+      depth: this.activeDepth,
+      nodes: this.nodes,
+    });
   }
 
   /** Set a phase-aware think target below the absolute search deadline. */
@@ -571,6 +591,6 @@ export function chooseComputerMove(game, state, difficulty = "medium", options =
   const random = options.random || Math.random;
   const now = options.now || (() => performance.now());
   return difficulty === "ultra"
-    ? new UltraSearch(game, now).choose(state)
+    ? new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress).choose(state)
     : standardMove(game, state, difficulty, random);
 }

@@ -42,6 +42,10 @@ assert.equal(translate("en", "resultDetail", { difficulty: "Hard", count: "17 mo
 assert.equal(translate("en", "computerMatchup", { difficulty: "Ultra" }), "You vs Ultra AI");
 assert.equal(translate("fr", "computerMatchup", { difficulty: "Ultra" }), "Vous contre l'IA Ultra");
 assert.equal(translate("fr", "matchLogTitle"), "LASER WAR · HISTORIQUE");
-assert.equal(translate("fr", "ultraSearch"), "Ultra · calcul des trajectoires forcées");
+assert.equal(translate("fr", "ultraSearch"), "Ultra · classement des coups possibles");
+assert.equal(
+  translate("en", "ultraSearching", { depth: 4, nodes: "1,284", seconds: "1.7" }),
+  "Ultra · depth 4 · 1,284 positions · 1.7s",
+);
 
 console.log("Web localization checks passed.");

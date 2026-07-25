@@ -1,19 +1,19 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.5";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.6";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.5";
+} from "./save.js?v=0.11.6";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.5";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.5";
-import { beamPoints } from "./beam.js?v=0.11.5";
-import { drawDetailKey } from "./result.js?v=0.11.5";
+} from "./progress.js?v=0.11.6";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.6";
+import { beamPoints } from "./beam.js?v=0.11.6";
+import { drawDetailKey } from "./result.js?v=0.11.6";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -59,6 +59,7 @@ let toastTimer = 0;
 let aiWorker = null;
 let aiRequestId = 0;
 let aiTimer = 0;
+let aiProgress = null;
 let ultraUnlockedThisMatch = false;
 
 function t(key, values = {}) {
@@ -199,24 +200,22 @@ function beginComputerTurn() {
   elements.aiDetail.classList.add("thinking");
   const started = performance.now();
   const difficulty = session.difficulty;
-  elements.aiDetail.textContent = difficulty === "ultra"
-    ? t("ultraSearch")
-    : t("standardSearch", { difficulty: difficultyName(difficulty) });
+  aiProgress = difficulty === "ultra" ? { phase: "preparing", depth: 0, nodes: 0 } : null;
+  renderAiProgress(difficulty, started);
   renderBoard();
   aiTimer = window.setInterval(() => {
-    const elapsed = (performance.now() - started) / 1000;
-    elements.aiDetail.textContent = difficulty === "ultra"
-      ? t("ultraSearching", { seconds: elapsed.toFixed(1) })
-      : t("standardSearching", {
-        difficulty: difficultyName(difficulty),
-        seconds: elapsed.toFixed(1),
-      });
+    renderAiProgress(difficulty, started);
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.11.5", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.11.6", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
+    if (data.type === "progress") {
+      aiProgress = data.progress;
+      renderAiProgress(difficulty, started);
+      return;
+    }
     finishComputerTurn(data.result);
   });
   aiWorker.addEventListener("error", () => {
@@ -227,6 +226,25 @@ function beginComputerTurn() {
     showToast(t("computerSearchFailed"));
   });
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
+}
+
+/** Render genuine AI search progress rather than a generic activity message. */
+function renderAiProgress(difficulty, started) {
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  if (difficulty !== "ultra") {
+    elements.aiDetail.textContent = t("standardSearching", {
+      difficulty: difficultyName(difficulty),
+      seconds,
+    });
+    return;
+  }
+  elements.aiDetail.textContent = aiProgress?.phase === "searching"
+    ? t("ultraSearching", {
+      depth: aiProgress.depth,
+      nodes: aiProgress.nodes.toLocaleString(language),
+      seconds,
+    })
+    : t("ultraSearch");
 }
 
 /** Apply a still-current AI result or restart search when it became stale. */
@@ -257,6 +275,7 @@ function cancelComputerTurn(invalidate = true) {
   aiTimer = 0;
   aiWorker?.terminate();
   aiWorker = null;
+  aiProgress = null;
   elements.aiDetail?.classList.remove("thinking");
 }
 

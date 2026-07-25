@@ -40,13 +40,20 @@ for (const [row, col, mirror] of setup) {
   state = game.resolveMove(state, { row, col, mirror }, false, false).state;
 }
 
-const search = new UltraSearch(game, () => 0, TEST_PROFILE);
+const progressEvents = [];
+const search = new UltraSearch(game, () => 0, TEST_PROFILE, (progressEvent) => {
+  progressEvents.push(progressEvent);
+});
 const result = search.choose(state);
 
 assert.ok(result.depth >= 4, `Ultra only completed depth ${result.depth}.`);
 assert.ok(game.isLegalMove(state, result.move));
 assert.notDeepEqual(result.move, { row: 0, col: 8, mirror: "/" });
 assert.ok(search.killers.size > 0, "Ultra should retain cutoff moves for ordering.");
+
+assert.equal(progressEvents[0].phase, "preparing");
+assert.ok(progressEvents.some(({ phase, depth }) => phase === "searching" && depth >= 1));
+assert.ok(progressEvents.some(({ nodes }) => nodes > 0));
 
 const fixture = JSON.parse(readFileSync(
   new URL("./fixtures/forced_loss_40_move_log.json", import.meta.url),
