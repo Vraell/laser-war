@@ -97,16 +97,29 @@ for (const [row, col, mirror] of forcingFixture.moves.slice(0, 16)) {
   }).state;
 }
 const forcingSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
-assert.equal(forcingSearch.forcingSetupScore(forcingState, 3), 9995);
+assert.equal(forcingSearch.forcingSetupScore(forcingState, 3), null);
 const [forcingRow, forcingCol, forcingMirror] = forcingFixture.moves[16];
 const exposedStateFromLog = game.resolveMove(forcingState, {
   row: forcingRow - 1,
   col: forcingCol - 1,
   mirror: forcingMirror,
 }).state;
-assert.equal(forcingSearch.isForcedExposure(exposedStateFromLog), true);
-assert.ok(
-  game.legalChildren(exposedStateFromLog).every(({ state: child }) => child.winner === "bottom"),
+assert.equal(forcingSearch.isForcedExposure(exposedStateFromLog), false);
+assert.deepEqual(
+  game.legalChildren(exposedStateFromLog)
+    .filter(({ state: child }) => child.winner !== "bottom")
+    .map(({ move }) => move),
+  [{ row: 2, col: 3, mirror: "\\" }],
+);
+const escapeSearch = new UltraSearch(game, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 1,
+  rootLimit: 12,
+  branchLimits: [10, 8, 6],
+});
+assert.deepEqual(
+  escapeSearch.choose(exposedStateFromLog).move,
+  { row: 2, col: 3, mirror: "\\" },
 );
 
 const decisionGame = new Game();
@@ -126,8 +139,7 @@ const decisionSearch = new UltraSearch(decisionGame, () => 0, {
 });
 const defensiveDecision = decisionSearch.choose(decisionState);
 assert.equal(defensiveDecision.depth, 3);
-assert.deepEqual(defensiveDecision.move, { row: 3, col: 2, mirror: "\\" });
-assert.notDeepEqual(defensiveDecision.move, { row: 3, col: 3, mirror: "\\" });
+assert.deepEqual(defensiveDecision.move, { row: 3, col: 3, mirror: "\\" });
 
 const protectedState = game.initialState("top");
 const pressureSearch = new UltraSearch(game, () => 0, TEST_PROFILE);

@@ -1,6 +1,8 @@
+import { exactJointPathWitness } from "./exact_routes.js?v=0.11.5";
+
 export const BOARD_SIZE = 9;
 export const MIDDLE_ROW = 4;
-const MAX_ROUTE_MIRRORS = 5;
+const FAST_ROUTE_MIRRORS = 5;
 
 export const Cell = Object.freeze({
   EMPTY: ".",
@@ -350,11 +352,7 @@ export class Game {
           || (Boolean(witness.slash & squareBit) && move.mirror !== Cell.SLASH)
           || (Boolean(witness.backslash & squareBit) && move.mirror !== Cell.BACKSLASH);
         if (!conflicts) {
-          const usesPlacedMirror = Boolean((witness.slash | witness.backslash) & squareBit);
-          this.cacheJointWitnesses(childBoard, [{
-            ...witness,
-            mirrorCount: witness.mirrorCount - (usesPlacedMirror ? 1 : 0),
-          }]);
+          this.cacheJointWitnesses(childBoard, [witness]);
           return true;
         }
       }
@@ -363,18 +361,12 @@ export class Game {
     const childWitnesses = this.jointPathWitnesses(childBoard);
     if (childWitnesses) {
       const learned = childWitnesses[0];
-      const squareBit = 1n << BigInt(move.row * BOARD_SIZE + move.col);
-      const usesPlacedMirror = Boolean((learned.slash | learned.backslash) & squareBit);
-      const parentWitness = {
-        ...learned,
-        mirrorCount: learned.mirrorCount + (usesPlacedMirror ? 1 : 0),
-      };
-      if (witnesses && parentWitness.mirrorCount <= MAX_ROUTE_MIRRORS && !witnesses.some((witness) => (
+      if (witnesses && !witnesses.some((witness) => (
         witness.empty === learned.empty
         && witness.slash === learned.slash
         && witness.backslash === learned.backslash
       ))) {
-        this.cacheJointWitnesses(parentBoard, [...witnesses, parentWitness]);
+        this.cacheJointWitnesses(parentBoard, [...witnesses, learned]);
       }
       return true;
     }
@@ -392,6 +384,9 @@ export class Game {
     ]) {
       witness = this.jointPairingWitness(board, targets);
       if (witness) break;
+    }
+    if (!witness) {
+      witness = exactJointPathWitness(board, this.sources, this.mirrorForbiddenSquares(board));
     }
     const witnesses = witness ? [witness] : null;
     this.cacheJointWitnesses(board, witnesses);
@@ -503,12 +498,11 @@ export class Game {
       );
       const result = rightRoutes.next();
       if (!result.done) {
-        const [witnessEmpty, witnessSlash, witnessBackslash, mirrorCount] = result.value;
+        const [witnessEmpty, witnessSlash, witnessBackslash] = result.value;
         return {
           empty: witnessEmpty,
           slash: witnessSlash,
           backslash: witnessBackslash,
-          mirrorCount,
         };
       }
     }
@@ -559,7 +553,7 @@ export class Game {
       options.push([BACKSLASH[direction], empty, slash, backslash, mirrorCount]);
     } else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
       options.push([direction, empty | squareBit, slash, backslash, mirrorCount]);
-      if (!forbiddenTurns.has(key(nextRow, nextCol)) && mirrorCount < MAX_ROUTE_MIRRORS) {
+      if (!forbiddenTurns.has(key(nextRow, nextCol)) && mirrorCount < FAST_ROUTE_MIRRORS) {
         options.push([SLASH[direction], empty, slash | squareBit, backslash, mirrorCount + 1]);
         options.push([BACKSLASH[direction], empty, slash, backslash | squareBit, mirrorCount + 1]);
       }

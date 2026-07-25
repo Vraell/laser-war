@@ -353,6 +353,11 @@ button.quiet {
   opacity: 1;
 }
 
+.cell:focus,
+.cell:focus-visible {
+  outline: none;
+}
+
 .cell:nth-child(even) {
   background: var(--cell-b);
 }

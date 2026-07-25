@@ -223,13 +223,49 @@ assert.equal(
   budgetGame.jointPathPreserved(budgetBoard, learnedChild.state.board, learnedMove),
   true,
 );
-assert.equal(new Game().jointPathsAvailable(rejectedChild.state.board), false);
+assert.equal(new Game().jointPathsAvailable(rejectedChild.state.board), true);
 assert.equal(
   budgetGame.jointPathPreserved(budgetBoard, rejectedChild.state.board, rejectedMove),
-  false,
+  true,
 );
-assert.ok(
-  budgetGame.jointPathWitnesses(budgetBoard).every(({ mirrorCount }) => mirrorCount <= 5),
-);
+
+const horizonGame = new Game();
+let horizonState = horizonGame.initialState();
+for (const [row, col, mirror] of [
+  [5, 8, "\\"], [9, 8, "/"], [5, 2, "/"], [1, 3, "\\"], [1, 8, "\\"],
+  [1, 7, "/"], [4, 7, "\\"], [3, 6, "\\"], [4, 3, "/"], [4, 2, "\\"],
+]) {
+  horizonState = horizonGame.resolveMove(horizonState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+for (const [row, col] of [[3, 7], [4, 9], [6, 1]]) {
+  const move = { row: row - 1, col: col - 1, mirror: "/" };
+  assert.equal(
+    horizonGame.isLegalMove(horizonState, move),
+    true,
+    `R${row}C${col} should not be rejected by the fast solver's mirror horizon.`,
+  );
+  const child = horizonGame.resolveMove(horizonState, move, false, false).state;
+  const witness = horizonGame.jointPathWitness(child.board);
+  const completed = child.board.map((boardRow) => boardRow.map(
+    (cell) => cell === Cell.SHIELD ? Cell.EMPTY : cell,
+  ));
+  for (let index = 0; index < 81; index += 1) {
+    const bit = 1n << BigInt(index);
+    const witnessMirror = witness.slash & bit
+      ? Cell.SLASH
+      : witness.backslash & bit ? Cell.BACKSLASH : null;
+    if (witnessMirror && completed[Math.floor(index / 9)][index % 9] === Cell.EMPTY) {
+      completed[Math.floor(index / 9)][index % 9] = witnessMirror;
+    }
+  }
+  assert.deepEqual(
+    horizonGame.fireLasers(completed).map(({ hitKing }) => hitKing).sort(),
+    ["bottom", "top"],
+  );
+}
 
 console.log("Web engine checks passed.");

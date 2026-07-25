@@ -1,5 +1,5 @@
-import { chooseComputerMove } from "./ai.js?v=0.11.4";
-import { Game } from "./engine.js?v=0.11.4";
+import { chooseComputerMove } from "./ai.js?v=0.11.5";
+import { Game } from "./engine.js?v=0.11.5";
 
 const game = new Game();
 

@@ -110,11 +110,12 @@ For this reconstruction:
 - kings are target squares;
 - protection blocks are ignored for this reachability test because they are temporary;
 - empty squares count as possible future routing squares;
-- the shared layout may require at most five additional mirrors;
+- there is no limit on how many future mirrors the shared layout may require;
 - forbidden laser-entry and king-adjacent squares can be crossed by a beam, but cannot be treated as possible future mirror turns.
 
 That means a move is illegal if it completely seals either king away, strands either side laser, or leaves only
-mutually incompatible theoretical routes.
+mutually incompatible theoretical routes. The validator proves whether such a finite shared layout exists; it
+does not reject a move merely because the routes need many future turns.
 
 ## No Legal Move
 

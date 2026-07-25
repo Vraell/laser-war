@@ -13,5 +13,6 @@ cp "$project_root/web/assets/menu-background.webp" "$staging/assets/menu-backgro
 cp "$project_root/web/assets/app-icon.png" "$staging/assets/app-icon.png"
 cp "$project_root/web/assets/InterVariable.ttf" "$staging/assets/InterVariable.ttf"
 cp "$project_root/web/assets/Inter-LICENSE.txt" "$staging/assets/Inter-LICENSE.txt"
+cp "$project_root/web/assets/logic-solver-LICENSE.txt" "$staging/assets/logic-solver-LICENSE.txt"
 
 printf 'Built web game at %s\n' "$staging"
