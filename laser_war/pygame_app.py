@@ -617,7 +617,8 @@ class LaserWarGame:
         points = [(source_x, source_y)]
         points.extend(self._cell_rect(row, col).center for row, col, _direction in beam.path)
         if beam.exited and beam.path:
-            row, col, direction = beam.path[-1]
+            row, col, incoming_direction = beam.path[-1]
+            direction = beam.exit_direction or incoming_direction
             x, y = self._cell_rect(row, col).center
             edge = {
                 "N": (x, BOARD_RECT.top),

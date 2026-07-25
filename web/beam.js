@@ -3,7 +3,8 @@ export function beamPoints(beam, sourceIndex) {
   const points = [[sourceIndex === 0 ? 0 : 900, 450]];
   points.push(...beam.path.map(([row, col]) => [col * 100 + 50, row * 100 + 50]));
   if (beam.exited && beam.path.length) {
-    const [row, col, direction] = beam.path.at(-1);
+    const [row, col, incomingDirection] = beam.path.at(-1);
+    const direction = beam.exitDirection || incomingDirection;
     const edge = {
       N: [col * 100 + 50, 0],
       E: [900, row * 100 + 50],

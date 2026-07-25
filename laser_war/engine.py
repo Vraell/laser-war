@@ -62,6 +62,7 @@ class BeamResult:
     hit_king: str | None = None
     exited: bool = False
     looped: bool = False
+    exit_direction: str | None = None
 
 
 @dataclass(frozen=True)
@@ -508,7 +509,7 @@ class Game:
             dr, dc = DIRS[direction]
             r, c = r + dr, c + dc
             if not self._in_bounds(r, c):
-                return BeamResult(tuple(path), exited=True)
+                return BeamResult(tuple(path), exited=True, exit_direction=direction)
 
             key = (r, c, direction)
             if key in visited:

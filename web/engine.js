@@ -241,7 +241,14 @@ export class Game {
       row += dr;
       col += dc;
       if (!this.inBounds(row, col)) {
-        return { path, hitShield: null, hitKing: null, exited: true, looped: false };
+        return {
+          path,
+          hitShield: null,
+          hitKing: null,
+          exited: true,
+          looped: false,
+          exitDirection: direction,
+        };
       }
       const beamKey = `${row},${col},${direction}`;
       if (visited.has(beamKey)) {

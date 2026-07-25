@@ -21,6 +21,14 @@ class PygameAppTests(unittest.TestCase):
 
         self.assertEqual(points[-1], (BOARD_RECT.right, BOARD_RECT.centery))
 
+    def test_exit_extension_uses_direction_after_final_mirror(self):
+        app = LaserWarGame.__new__(LaserWarGame)
+        beam = BeamResult(((1, 0, "N"),), exited=True, exit_direction="W")
+
+        points = app._beam_points(beam, 0)
+
+        self.assertEqual(points[-1], (BOARD_RECT.left, app._cell_rect(1, 0).centery))
+
     def test_final_volley_is_retained_after_winning_animation(self):
         app = LaserWarGame.__new__(LaserWarGame)
         app.scene = "game"

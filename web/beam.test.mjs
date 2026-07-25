@@ -15,6 +15,23 @@ assert.deepEqual(
   beamPoints({ path: [[2, 4, "S"]], exited: false }, 0).at(-1),
   [450, 250],
 );
+assert.deepEqual(
+  beamPoints({ path: [[1, 0, "N"]], exited: true, exitDirection: "W" }, 0).at(-1),
+  [0, 150],
+);
+
+const reportedGame = new Game();
+let reportedState = reportedGame.initialState();
+let reportedOutcome = null;
+for (const [row, col, mirror] of [
+  [4, 1, "/"], [4, 5, "/"], [4, 7, "\\"], [3, 6, "/"], [0, 1, "/"],
+  [3, 1, "\\"], [3, 0, "\\"], [1, 0, "\\"], [3, 2, "/"], [3, 7, "\\"],
+]) {
+  reportedOutcome = reportedGame.resolveMove(reportedState, { row, col, mirror });
+  reportedState = reportedOutcome.state;
+}
+assert.equal(reportedOutcome.beams[0].exitDirection, "W");
+assert.deepEqual(beamPoints(reportedOutcome.beams[0], 0).at(-1), [0, 150]);
 
 const screenshotGame = new Game();
 const screenshotState = screenshotGame.initialState();
