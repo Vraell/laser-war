@@ -325,24 +325,61 @@ export function chooseComputerMove(game, state, difficulty = "medium") {
     return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
   }
 
-  if (difficulty === "hard") {
-    const deadline = started + 320;
-    for (const candidate of ranked.slice(0, Math.min(14, ranked.length))) {
-      if (performance.now() >= deadline || candidate.state.winner) break;
-      let worstReply = Infinity;
-      const replies = game.legalMoves(candidate.state);
-      for (const reply of replies) {
-        const replyState = game.resolveMove(candidate.state, reply, false).state;
-        nodes += 1;
-        worstReply = Math.min(worstReply, scoreForTop(game, replyState));
-        if (performance.now() >= deadline) break;
+  const deadline = started + (difficulty === "hard" ? 500 : 140);
+  const minimumCandidates = difficulty === "hard" ? 24 : 6;
+  const analyzed = [];
+  for (const candidate of ranked) {
+    if (candidate.state.winner === "top") {
+      return { move: candidate.move, score: 10000, nodes, elapsed: performance.now() - started };
+    }
+    if (performance.now() >= deadline && analyzed.length >= 1) break;
+    let worstReply = Infinity;
+    let complete = true;
+    const replies = game.legalMoves(candidate.state);
+    if (!replies.length) worstReply = 0;
+    for (const reply of replies) {
+      if (performance.now() >= deadline && analyzed.length >= 1) {
+        complete = false;
+        break;
       }
-      if (worstReply !== Infinity) candidate.score = worstReply;
+      const replyState = game.resolveMove(candidate.state, reply, false).state;
+      nodes += 1;
+      worstReply = Math.min(worstReply, scoreForTop(game, replyState));
+      if (replyState.winner === "bottom") {
+        worstReply = -10000;
+        complete = true;
+        break;
+      }
+    }
+    if (complete) {
+      candidate.score = worstReply;
+      analyzed.push(candidate);
+    }
+    const safeCandidates = analyzed.filter((item) => item.score > -10000).length;
+    if (analyzed.length >= minimumCandidates && safeCandidates >= 3) break;
+  }
+
+  if (analyzed.length) {
+    analyzed.sort((left, right) => right.score - left.score);
+    ranked.splice(0, ranked.length, ...analyzed);
+  }
+
+  if (difficulty === "hard") {
+    const picked = ranked[0];
+    return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
+  }
+
+  if (!analyzed.length) {
+    for (const candidate of ranked.slice(0, 3)) {
+      const replies = game.legalMoves(candidate.state);
+      if (replies.some((reply) => game.resolveMove(candidate.state, reply, false).state.winner === "bottom")) {
+        candidate.score = -10000;
+      }
     }
     ranked.sort((left, right) => right.score - left.score);
   }
 
-  const poolSize = difficulty === "medium" ? Math.min(3, ranked.length) : 1;
+  const poolSize = Math.min(3, ranked.length);
   const picked = ranked[Math.floor(Math.random() * poolSize)];
   return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
 }

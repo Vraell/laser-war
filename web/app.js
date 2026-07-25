@@ -1,4 +1,13 @@
 import { BOARD_SIZE, Cell, Game, chooseComputerMove, cloneState } from "./engine.js";
+import {
+  SAVE_VERSION,
+  buildActiveSave,
+  buildMatchRecord,
+  createMatchId,
+  legacyMatchId,
+  loadMatchArchive,
+  upsertMatchRecord,
+} from "./archive.js";
 
 const SAVE_KEY = "laser-war.web.v1";
 const game = new Game();
@@ -15,6 +24,7 @@ const elements = {
   moveCount: document.querySelector("#move-count"),
   aiDetail: document.querySelector("#ai-detail"),
   continueButton: document.querySelector("#continue-game"),
+  exportLogs: document.querySelector("#export-logs"),
   slash: document.querySelector("#select-slash"),
   backslash: document.querySelector("#select-backslash"),
   pauseOverlay: document.querySelector("#pause-overlay"),
@@ -33,13 +43,21 @@ let paused = false;
 let lastOutcome = null;
 let toastTimer = 0;
 
-function createSession(mode = "computer", difficulty = "medium") {
+function createSession(
+  mode = "computer",
+  difficulty = "medium",
+  id = createMatchId(),
+  startedAt = new Date().toISOString(),
+) {
   return {
+    id,
+    startedAt,
     mode,
     difficulty,
     state: game.initialState(),
     history: [],
     redo: [],
+    events: [],
   };
 }
 
@@ -64,18 +82,8 @@ function currentDifficulty() {
 
 function startGame(mode, difficulty = currentDifficulty(), persist = true) {
   session = createSession(mode, difficulty);
-  selectedMirror = Cell.SLASH;
-  inputLocked = false;
-  paused = false;
   lastOutcome = null;
-  elements.menu.hidden = true;
-  elements.gameScreen.hidden = false;
-  elements.pauseOverlay.hidden = true;
-  elements.resultOverlay.hidden = true;
-  elements.modeLabel.textContent = mode === "computer" ? `VS COMPUTER · ${difficulty.toUpperCase()}` : "LOCAL TWO PLAYER";
-  refreshLegalMoves();
-  clearBeams();
-  render();
+  startGameView();
   if (persist) saveGame();
 }
 
@@ -101,6 +109,7 @@ function playMove(move, actor) {
   };
   session.history.push(record);
   session.redo = [];
+  session.events.push(eventForRecord(record));
   lastOutcome = outcome;
   inputLocked = true;
   refreshLegalMoves();
@@ -134,6 +143,7 @@ function beginComputerTurn() {
     inputLocked = false;
     if (!result.move) {
       session.state.draw = true;
+      saveGame();
       render();
       showResult();
       return;
@@ -151,9 +161,13 @@ function refreshLegalMoves() {
 }
 
 function render() {
+  renderMirrorSelection();
   renderBoard();
   renderStatus();
   renderLog();
+}
+
+function renderMirrorSelection() {
   elements.slash.classList.toggle("selected", selectedMirror === Cell.SLASH);
   elements.backslash.classList.toggle("selected", selectedMirror === Cell.BACKSLASH);
 }
@@ -253,7 +267,7 @@ function renderLog() {
     elements.log.append(empty);
     return;
   }
-  for (const record of session.history.slice(-8)) {
+  for (const record of session.history) {
     const item = document.createElement("li");
     item.textContent = recordSummary(record);
     elements.log.append(item);
@@ -268,6 +282,20 @@ function recordSummary(record) {
   }
   if (record.outcome.hitKings.size) effects.push(`${[...record.outcome.hitKings].sort().join(" and ")} king hit`);
   return `${record.actor}: ${record.move.mirror} at R${record.move.row + 1}C${record.move.col + 1} · ${effects.join(", ") || "no damage"}`;
+}
+
+function eventForRecord(record, type = "move") {
+  return {
+    type,
+    at: new Date().toISOString(),
+    number: record.number,
+    actor: record.actor,
+    row: record.move.row,
+    col: record.move.col,
+    mirror: record.move.mirror,
+    destroyed: record.outcome.destroyed.map(([row, col]) => [row, col]),
+    hitKings: [...record.outcome.hitKings].sort(),
+  };
 }
 
 function renderBeams(beams) {
@@ -311,6 +339,7 @@ function undo() {
   if (inputLocked || !session.history.length) return;
   const record = session.history.pop();
   session.redo.push(record);
+  session.events.push({ type: "undo", at: new Date().toISOString(), number: record.number });
   session.state = cloneState(record.before);
   lastOutcome = null;
   elements.resultOverlay.hidden = true;
@@ -342,6 +371,7 @@ function redo() {
   };
   session.history.push(record);
   session.state = outcome.state;
+  session.events.push(eventForRecord(record, "redo"));
   lastOutcome = outcome;
   refreshLegalMoves();
   render();
@@ -355,10 +385,12 @@ function redo() {
 }
 
 function restart() {
+  archiveCurrentSession("abandoned");
   startGame(session.mode, session.difficulty);
 }
 
 function returnToMenu() {
+  archiveCurrentSession("abandoned");
   inputLocked = false;
   paused = false;
   elements.pauseOverlay.hidden = true;
@@ -375,46 +407,67 @@ function togglePause() {
   renderBoard();
 }
 
-function saveGame() {
-  const data = {
-    version: 1,
-    mode: session.mode,
-    difficulty: session.difficulty,
-    moves: session.history.map((record) => ({ actor: record.actor, ...record.move })),
-  };
-  localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  elements.continueButton.disabled = false;
+function saveGame(status = "active") {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(session)));
+    if (session.history.length) {
+      upsertMatchRecord(localStorage, buildMatchRecord(session, status));
+    }
+    elements.continueButton.disabled = false;
+    updateExportButton();
+  } catch {
+    showToast("Match storage is full or unavailable.");
+  }
+}
+
+function archiveCurrentSession(status) {
+  if (!session.history.length) return;
+  saveGame(status);
 }
 
 function hasSave() {
   try {
-    return JSON.parse(localStorage.getItem(SAVE_KEY))?.version === 1;
+    return [1, SAVE_VERSION].includes(JSON.parse(localStorage.getItem(SAVE_KEY))?.version);
   } catch {
     return false;
   }
 }
 
+function sessionFromSave(data) {
+  if (![1, SAVE_VERSION].includes(data?.version)) throw new Error("Unsupported save.");
+  const restored = createSession(
+    data.mode,
+    data.difficulty,
+    data.matchId || legacyMatchId(data),
+    data.startedAt || new Date().toISOString(),
+  );
+  for (const item of data.moves || []) {
+    const before = cloneState(restored.state);
+    const move = { row: item.row, col: item.col, mirror: item.mirror };
+    const outcome = game.resolveMove(restored.state, move);
+    restored.state = outcome.state;
+    restored.history.push({
+      number: restored.history.length + 1,
+      actor: item.actor,
+      move,
+      before,
+      after: cloneState(outcome.state),
+      outcome,
+    });
+  }
+  restored.events = Array.isArray(data.events)
+    ? data.events
+    : restored.history.map((record) => eventForRecord(record));
+  return restored;
+}
+
 function continueGame() {
-  let data;
   try {
-    data = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (data?.version !== 1) throw new Error("Unsupported save.");
-    startGame(data.mode, data.difficulty, false);
-    for (const item of data.moves) {
-      const before = cloneState(session.state);
-      const move = { row: item.row, col: item.col, mirror: item.mirror };
-      const outcome = game.resolveMove(session.state, move);
-      session.state = outcome.state;
-      session.history.push({
-        number: session.history.length + 1,
-        actor: item.actor,
-        move,
-        before,
-        after: cloneState(outcome.state),
-        outcome,
-      });
-      lastOutcome = outcome;
-    }
+    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    session = sessionFromSave(data);
+    startGameView();
+    lastOutcome = session.history.at(-1)?.outcome || null;
+    saveGame();
   } catch (error) {
     localStorage.removeItem(SAVE_KEY);
     elements.continueButton.disabled = true;
@@ -422,14 +475,63 @@ function continueGame() {
     showToast(`Could not load save: ${error.message}`);
     return;
   }
-  refreshLegalMoves();
-  render();
   if (session.state.winner || session.state.draw) {
     if (lastOutcome) renderBeams(lastOutcome.beams);
     showResult();
   } else if (computerTurn()) {
     beginComputerTurn();
   }
+}
+
+function startGameView() {
+  selectedMirror = Cell.SLASH;
+  inputLocked = false;
+  paused = false;
+  elements.menu.hidden = true;
+  elements.gameScreen.hidden = false;
+  elements.pauseOverlay.hidden = true;
+  elements.resultOverlay.hidden = true;
+  elements.modeLabel.textContent =
+    session.mode === "computer" ? `VS COMPUTER · ${session.difficulty.toUpperCase()}` : "LOCAL TWO PLAYER";
+  refreshLegalMoves();
+  clearBeams();
+  render();
+}
+
+function migrateStoredSaveToArchive() {
+  try {
+    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (![1, SAVE_VERSION].includes(data?.version)) return;
+    const restored = sessionFromSave(data);
+    localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(restored)));
+    if (restored.history.length) {
+      upsertMatchRecord(localStorage, buildMatchRecord(restored));
+    }
+  } catch {
+    // Continue still reports malformed active saves when the user attempts to load one.
+  }
+}
+
+function updateExportButton() {
+  elements.exportLogs.disabled = loadMatchArchive(localStorage).matches.length === 0;
+}
+
+function exportMatchLogs() {
+  const archive = loadMatchArchive(localStorage);
+  if (!archive.matches.length) {
+    showToast("No recorded matches yet.");
+    return;
+  }
+  const payload = {
+    ...archive,
+    exportedAt: new Date().toISOString(),
+  };
+  const url = URL.createObjectURL(new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `laser-war-match-logs-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function showToast(message) {
@@ -442,7 +544,8 @@ function showToast(message) {
 function selectMirror(mirror) {
   if (inputLocked) return;
   selectedMirror = mirror;
-  render();
+  renderMirrorSelection();
+  renderBoard();
 }
 
 function title(value) {
@@ -510,6 +613,7 @@ document.querySelector("#main-menu").addEventListener("click", returnToMenu);
 document.querySelector("#play-again").addEventListener("click", restart);
 document.querySelector("#result-menu").addEventListener("click", returnToMenu);
 document.querySelector("#show-rules").addEventListener("click", () => elements.rules.showModal());
+elements.exportLogs.addEventListener("click", exportMatchLogs);
 elements.sound.addEventListener("click", () => audio.toggle());
 
 document.addEventListener("keydown", (event) => {
@@ -522,11 +626,14 @@ document.addEventListener("keydown", (event) => {
   else if (event.key.toLowerCase() === "r") restart();
 });
 
+migrateStoredSaveToArchive();
 elements.continueButton.disabled = !hasSave();
+updateExportButton();
 window.__laserWar = {
   game,
   startGame,
   playMove,
   getSession: () => session,
   getLegalMoves: () => legalMoves,
+  getMatchArchive: () => loadMatchArchive(localStorage),
 };

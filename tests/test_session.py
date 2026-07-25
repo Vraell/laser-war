@@ -35,7 +35,31 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(loaded.state, session.state)
             self.assertEqual(loaded.mode, "computer")
             self.assertEqual(loaded.difficulty, "hard")
+            self.assertEqual(loaded.match_id, session.match_id)
+            self.assertEqual(loaded.started_at, session.started_at)
+            self.assertEqual(loaded.events, session.events)
             self.assertEqual(loaded.history[0].summary, session.history[0].summary)
+
+    def test_match_log_updates_one_file_and_preserves_every_move(self):
+        session = GameSession(mode="local")
+        session.play(Move(4, 4, Cell.MIRROR_SLASH), "Bottom")
+
+        with TemporaryDirectory() as directory:
+            log_directory = Path(directory) / "matches"
+            path = session.save_match_log(log_directory)
+            self.assertIsNotNone(path)
+
+            session.play(Move(4, 3, Cell.MIRROR_BACKSLASH), "Top")
+            updated_path = session.save_match_log(log_directory, "abandoned")
+            self.assertEqual(updated_path, path)
+
+            files = list(log_directory.glob("*.json"))
+            self.assertEqual(files, [path])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["move_count"], 2)
+            self.assertEqual(data["status"], "abandoned")
+            self.assertEqual([move["number"] for move in data["moves"]], [1, 2])
+            self.assertEqual([event["type"] for event in data["events"]], ["move", "move"])
 
     def test_failed_redo_keeps_the_record_available(self):
         session = GameSession(mode="local")

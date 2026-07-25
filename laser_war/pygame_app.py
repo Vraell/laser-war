@@ -12,7 +12,7 @@ import pygame
 from .ai import DIFFICULTIES, ComputerAI, SearchResult
 from .audio import AudioBank
 from .engine import BOARD_SIZE, MIDDLE_ROW, Cell, Move, State
-from .paths import SAVE_PATH
+from .paths import MATCH_LOG_DIRECTORY, SAVE_PATH
 from .session import GameSession, TurnRecord
 
 DESIGN_SIZE = (1280, 800)
@@ -761,6 +761,7 @@ class LaserWarGame:
 
     def _restart(self) -> None:
         self._cancel_ai()
+        self._archive_match("abandoned")
         self.session.new_game()
         self.animation = None
         self.final_animation = None
@@ -772,6 +773,7 @@ class LaserWarGame:
 
     def _return_to_menu(self) -> None:
         self._cancel_ai()
+        self._archive_match("abandoned")
         self.animation = None
         self.final_animation = None
         self.paused = False
@@ -780,8 +782,15 @@ class LaserWarGame:
     def _autosave(self) -> None:
         try:
             self.session.save(SAVE_PATH)
+            self.session.save_match_log(MATCH_LOG_DIRECTORY)
         except OSError:
             self._show_toast("Autosave is unavailable.")
+
+    def _archive_match(self, status: str) -> None:
+        try:
+            self.session.save_match_log(MATCH_LOG_DIRECTORY, status)
+        except OSError:
+            self._show_toast("Match log storage is unavailable.")
 
     def _refresh_legal_moves(self) -> None:
         self.legal_moves = set(self.session.game.legal_moves(self.session.state))

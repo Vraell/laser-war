@@ -27,3 +27,4 @@ def user_data_directory(
 
 
 SAVE_PATH = user_data_directory() / "autosave.json"
+MATCH_LOG_DIRECTORY = user_data_directory() / "matches"

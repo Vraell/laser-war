@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .engine import Cell, Game, Move, MoveOutcome, State
 
@@ -48,6 +50,9 @@ class GameSession:
         self.state = self.game.initial_state()
         self.history: list[TurnRecord] = []
         self.redo_stack: list[TurnRecord] = []
+        self.match_id = str(uuid4())
+        self.started_at = self._now()
+        self.events: list[dict[str, Any]] = []
 
     def new_game(self, *, mode: str | None = None, difficulty: str | None = None) -> None:
         if mode is not None:
@@ -57,6 +62,9 @@ class GameSession:
         self.state = self.game.initial_state()
         self.history.clear()
         self.redo_stack.clear()
+        self.match_id = str(uuid4())
+        self.started_at = self._now()
+        self.events.clear()
 
     def play(self, move: Move, actor: str) -> TurnRecord:
         before = self.state
@@ -65,6 +73,7 @@ class GameSession:
         self.history.append(record)
         self.redo_stack.clear()
         self.state = outcome.state
+        self.events.append(self._event_for_record(record))
         return record
 
     def undo(self, plies: int = 1) -> list[TurnRecord]:
@@ -74,6 +83,7 @@ class GameSession:
             self.redo_stack.append(record)
             self.state = record.before
             undone.append(record)
+            self.events.append({"type": "undo", "at": self._now(), "number": record.number})
         return undone
 
     def redo(self, plies: int = 1) -> list[TurnRecord]:
@@ -87,13 +97,17 @@ class GameSession:
             self.history.append(record)
             self.state = outcome.state
             restored.append(record)
+            self.events.append(self._event_for_record(record, event_type="redo"))
         return restored
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": SAVE_VERSION,
+            "match_id": self.match_id,
+            "started_at": self.started_at,
             "mode": self.mode,
             "difficulty": self.difficulty,
+            "events": self.events,
             "moves": [
                 {
                     "actor": record.actor,
@@ -111,13 +125,77 @@ class GameSession:
         temporary.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
         temporary.replace(path)
 
+    def to_match_dict(self, status: str = "active") -> dict[str, Any]:
+        completed = bool(self.state.winner or self.state.draw)
+        resolved_status = "completed" if completed else status
+        timestamp = self._now()
+        return {
+            "version": SAVE_VERSION,
+            "id": self.match_id,
+            "started_at": self.started_at,
+            "updated_at": timestamp,
+            "ended_at": None if resolved_status == "active" else timestamp,
+            "status": resolved_status,
+            "mode": self.mode,
+            "difficulty": self.difficulty,
+            "winner": self.state.winner,
+            "draw": self.state.draw,
+            "turn": self.state.turn,
+            "final_board": ["".join(cell.value for cell in row) for row in self.state.board],
+            "move_count": len(self.history),
+            "moves": [
+                {
+                    "number": record.number,
+                    "actor": record.actor,
+                    "row": record.move.row,
+                    "col": record.move.col,
+                    "mirror": record.move.mirror.value,
+                    "destroyed": [list(position) for position in record.outcome.destroyed],
+                    "hit_kings": sorted(record.outcome.hit_kings),
+                }
+                for record in self.history
+            ],
+            "events": self.events,
+        }
+
+    def save_match_log(self, directory: Path, status: str = "active") -> Path | None:
+        if not self.history:
+            return None
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{self.started_at[:10]}_{self.match_id}.json"
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(self.to_match_dict(status), indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+        return path
+
     @classmethod
     def load(cls, path: Path, game: Game | None = None) -> GameSession:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("version") != SAVE_VERSION:
             raise ValueError("This save was created by an unsupported version of Laser War.")
         session = cls(game, mode=str(data["mode"]), difficulty=str(data["difficulty"]))
+        session.match_id = str(data.get("match_id", session.match_id))
+        session.started_at = str(data.get("started_at", session.started_at))
         for item in data.get("moves", []):
             move = Move(int(item["row"]), int(item["col"]), Cell(str(item["mirror"])))
             session.play(move, str(item["actor"]))
+        if isinstance(data.get("events"), list):
+            session.events = list(data["events"])
         return session
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(UTC).isoformat()
+
+    def _event_for_record(self, record: TurnRecord, event_type: str = "move") -> dict[str, Any]:
+        return {
+            "type": event_type,
+            "at": self._now(),
+            "number": record.number,
+            "actor": record.actor,
+            "row": record.move.row,
+            "col": record.move.col,
+            "mirror": record.move.mirror.value,
+            "destroyed": [list(position) for position in record.outcome.destroyed],
+            "hit_kings": sorted(record.outcome.hit_kings),
+        }
