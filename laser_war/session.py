@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from .engine import Cell, Game, Move, MoveOutcome, State
+from .storage import write_json_atomic
 
 SAVE_VERSION = 2
 
@@ -120,10 +121,7 @@ class GameSession:
         }
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
-        temporary.replace(path)
+        write_json_atomic(path, self.to_dict())
 
     def to_match_dict(self, status: str = "active") -> dict[str, Any]:
         completed = bool(self.state.winner or self.state.draw)
@@ -161,11 +159,8 @@ class GameSession:
     def save_match_log(self, directory: Path, status: str = "active") -> Path | None:
         if not self.history:
             return None
-        directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{self.started_at[:10]}_{self.match_id}.json"
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(self.to_match_dict(status), indent=2) + "\n", encoding="utf-8")
-        temporary.replace(path)
+        write_json_atomic(path, self.to_match_dict(status))
         return path
 
     @classmethod

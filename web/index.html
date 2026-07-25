@@ -25,12 +25,17 @@
           <label><input type="radio" name="difficulty" value="easy"><span>Easy</span></label>
           <label><input type="radio" name="difficulty" value="medium" checked><span>Medium</span></label>
           <label><input type="radio" name="difficulty" value="hard"><span>Hard</span></label>
+          <label class="ultra-option">
+            <input id="ultra-difficulty" type="radio" name="difficulty" value="ultra" disabled>
+            <span>Ultra <small id="ultra-state">LOCKED</small></span>
+          </label>
         </fieldset>
+        <p class="progress-note" id="progress-note">Defeat Hard to unlock Ultra.</p>
         <div class="menu-utilities">
           <button class="quiet" id="show-rules">Rules</button>
         </div>
       </div>
-      <span class="version">v0.5 web</span>
+      <span class="version">v0.6 web</span>
     </section>
 
     <main class="game-screen" id="game-screen" hidden>
@@ -54,7 +59,11 @@
             </div>
             <div class="laser-source right-source" aria-hidden="true"><span></span></div>
             <div class="result-overlay" id="result-overlay" hidden>
-              <h2 id="result-title">VICTORY</h2>
+              <div class="result-copy">
+                <p class="eyebrow">MATCH COMPLETE</p>
+                <h2 id="result-title">VICTORY</h2>
+                <p id="result-detail"></p>
+              </div>
               <div>
                 <button class="primary" id="play-again">Play Again</button>
                 <button id="result-menu">Main Menu</button>
@@ -67,7 +76,7 @@
           <div class="status-block">
             <span class="status-light" id="status-light"></span>
             <div>
-              <p class="eyebrow">MATCH STATUS</p>
+              <p class="eyebrow" id="turn-label">MATCH STATUS</p>
               <h2 id="status">Your turn</h2>
             </div>
           </div>
@@ -91,7 +100,7 @@
             <ol id="match-log"><li class="empty-log">Awaiting the first move.</li></ol>
           </section>
 
-          <div class="ai-detail" id="ai-detail"></div>
+          <div class="ai-detail" id="ai-detail" aria-live="polite"></div>
           <footer class="match-actions">
             <button id="new-match">New Match</button>
             <button id="main-menu">Main Menu</button>
@@ -123,7 +132,7 @@
           <section><h3>Damage</h3><p>A beam destroys the first shield it touches. Mirrors are permanent.</p></section>
           <section><h3>Win</h3><p>Hit the opposing king without hitting your own. A simultaneous hit is a draw.</p></section>
           <section><h3>Restrictions</h3><p>Mirrors cannot touch a king. Both kings and both lasers must retain a possible path.</p></section>
-          <section><h3>Controls</h3><p>Q and E select mirrors. U undoes. R restarts. Escape pauses.</p></section>
+          <section><h3>Paths</h3><p>Each laser must retain a route to a king, and one must retain a route to yours.</p></section>
         </div>
       </form>
     </dialog>

@@ -104,7 +104,17 @@ class Game:
         return State(self._freeze(board), turn=turn)
 
     def legal_moves(self, state: State) -> list[Move]:
-        return [move for move in self._pseudo_moves(state) if self.is_legal_move(state, move)]
+        return [move for move, _child in self.legal_children(state)]
+
+    def legal_children(self, state: State) -> list[tuple[Move, State]]:
+        children: list[tuple[Move, State]] = []
+        for move in self._pseudo_moves(state):
+            try:
+                child = self.resolve_move(state, move, check_no_legal_moves=False).state
+            except ValueError:
+                continue
+            children.append((move, child))
+        return children
 
     def is_legal_move(self, state: State, move: Move) -> bool:
         try:

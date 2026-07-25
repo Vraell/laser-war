@@ -6,7 +6,7 @@ from math import inf
 from threading import Event
 from time import monotonic
 
-from .engine import Game, Move, State
+from .engine import Cell, Game, Move, State
 
 
 @dataclass(frozen=True)
@@ -15,12 +15,15 @@ class DifficultyProfile:
     time_limit: float
     max_depth: int
     candidate_spread: int = 1
+    root_limit: int | None = None
+    branch_limits: tuple[int, ...] = ()
 
 
 DIFFICULTIES = {
     "easy": DifficultyProfile("Easy", 0.20, 1, 5),
     "medium": DifficultyProfile("Medium", 1.25, 3, 1),
     "hard": DifficultyProfile("Hard", 3.50, 5, 1),
+    "ultra": DifficultyProfile("Ultra", 10.0, 4, 1, 24, (22, 12, 8)),
 }
 
 
@@ -45,7 +48,10 @@ class ComputerAI:
         self.cancel_event: Event | None = None
         self.nodes = 0
         self.ordering: dict[State, Move] = {}
+        self.history: dict[Move, int] = {}
         self.cache: dict[tuple[State, int], float] = {}
+        self.children_cache: dict[State, list[tuple[Move, State]]] = {}
+        self.profile = DIFFICULTIES["medium"]
 
     def choose_move(
         self,
@@ -54,16 +60,21 @@ class ComputerAI:
         cancel_event: Event | None = None,
     ) -> SearchResult:
         profile = DIFFICULTIES.get(difficulty, DIFFICULTIES["medium"])
+        self.profile = profile
         started = monotonic()
         self.deadline = started + profile.time_limit
         self.cancel_event = cancel_event
         self.nodes = 0
         self.ordering.clear()
+        self.history.clear()
         self.cache.clear()
+        self.children_cache.clear()
 
-        legal = self.game.legal_moves(state)
-        if not legal:
+        children = self.game.legal_children(state)
+        if not children:
             return SearchResult(None, self.game.evaluate(state), 0, self.nodes, monotonic() - started)
+        self.children_cache[state] = children
+        legal = [move for move, _child in children]
 
         best_move = legal[0]
         best_score = -inf
@@ -101,12 +112,13 @@ class ComputerAI:
         alpha = -inf
         beta = inf
         ranked: list[tuple[float, Move]] = []
-        ordered = self._ordered_moves(state, legal)
+        ordered = self._ordered_children(state, legal)
+        if depth >= 3 and self.profile.root_limit is not None:
+            ordered = ordered[: self.profile.root_limit]
 
-        for move in ordered:
+        for move, child in ordered:
             self._check_interrupted()
-            child = self.game.resolve_move(state, move, check_no_legal_moves=False).state
-            score = -self._negamax(child, depth - 1, -beta, -alpha)
+            score = -self._negamax(child, depth - 1, -beta, -alpha, ply=1)
             ranked.append((score, move))
             alpha = max(alpha, score)
 
@@ -114,7 +126,7 @@ class ComputerAI:
         score, move = ranked[0]
         return score, move, ranked
 
-    def _negamax(self, state: State, depth: int, alpha: float, beta: float) -> float:
+    def _negamax(self, state: State, depth: int, alpha: float, beta: float, *, ply: int) -> float:
         self._check_interrupted()
         self.nodes += 1
         if depth <= 0 or state.winner or state.draw:
@@ -125,22 +137,25 @@ class ComputerAI:
         if cached is not None:
             return cached
 
-        legal = self.game.legal_moves(state)
-        if not legal:
+        children = self._ordered_children(state)
+        if not children:
             return 0
+        branch_limit = self._branch_limit(ply)
+        if branch_limit is not None:
+            children = children[:branch_limit]
 
         value = -inf
         cutoff = False
         best_move: Move | None = None
-        for move in self._ordered_moves(state, legal):
-            child = self.game.resolve_move(state, move, check_no_legal_moves=False).state
-            score = -self._negamax(child, depth - 1, -beta, -alpha)
+        for move, child in children:
+            score = -self._negamax(child, depth - 1, -beta, -alpha, ply=ply + 1)
             if score > value:
                 value = score
                 best_move = move
             alpha = max(alpha, value)
             if alpha >= beta:
                 cutoff = True
+                self.history[move] = self.history.get(move, 0) + depth * depth
                 break
 
         if best_move is not None:
@@ -149,11 +164,50 @@ class ComputerAI:
             self.cache[cache_key] = value
         return value
 
-    def _ordered_moves(self, state: State, moves: list[Move]) -> list[Move]:
+    def _ordered_children(
+        self,
+        state: State,
+        moves: list[Move] | None = None,
+    ) -> list[tuple[Move, State]]:
+        children = self.children_cache.get(state)
+        if children is None:
+            children = self.game.legal_children(state)
+            if moves is not None:
+                legal = set(moves)
+                children = [item for item in children if item[0] in legal]
+            self.children_cache[state] = children
+
         preferred = self.ordering.get(state)
-        if preferred is None or preferred not in moves:
-            return moves
-        return [preferred, *(move for move in moves if move != preferred)]
+        return sorted(
+            children,
+            key=lambda item: self._move_priority(state, item[0], item[1], preferred),
+            reverse=True,
+        )
+
+    def _move_priority(self, state: State, move: Move, child: State, preferred: Move | None) -> float:
+        if child.winner == state.turn:
+            return 1_000_000
+        if child.draw:
+            terminal = 0
+        elif child.winner:
+            return -1_000_000
+        else:
+            terminal = -self.game.evaluate(child) * 1_000
+
+        adjacent_mirrors = 0
+        for row in range(max(0, move.row - 1), min(self.game.size, move.row + 2)):
+            for col in range(max(0, move.col - 1), min(self.game.size, move.col + 2)):
+                if state.board[row][col] in (Cell.MIRROR_SLASH, Cell.MIRROR_BACKSLASH):
+                    adjacent_mirrors += 1
+
+        principal = 100_000 if move == preferred else 0
+        return principal + terminal + self.history.get(move, 0) + adjacent_mirrors * 20
+
+    def _branch_limit(self, ply: int) -> int | None:
+        if not self.profile.branch_limits:
+            return None
+        index = min(max(0, ply - 1), len(self.profile.branch_limits) - 1)
+        return self.profile.branch_limits[index]
 
     def _check_interrupted(self) -> None:
         if monotonic() >= self.deadline or (self.cancel_event and self.cancel_event.is_set()):

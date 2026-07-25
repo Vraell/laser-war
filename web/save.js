@@ -26,7 +26,6 @@ export function buildActiveSave(session) {
     startedAt: session.startedAt,
     mode: session.mode,
     difficulty: session.difficulty,
-    events: session.events,
     moves: session.history.map((record) => ({
       actor: record.actor,
       row: record.move.row,

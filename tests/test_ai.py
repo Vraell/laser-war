@@ -32,7 +32,9 @@ class AITests(unittest.TestCase):
     def test_difficulty_profiles_increase_search_budget(self):
         self.assertLess(DIFFICULTIES["easy"].time_limit, DIFFICULTIES["medium"].time_limit)
         self.assertLess(DIFFICULTIES["medium"].time_limit, DIFFICULTIES["hard"].time_limit)
+        self.assertLess(DIFFICULTIES["hard"].time_limit, DIFFICULTIES["ultra"].time_limit)
         self.assertLess(DIFFICULTIES["easy"].max_depth, DIFFICULTIES["hard"].max_depth)
+        self.assertGreaterEqual(DIFFICULTIES["ultra"].max_depth, 4)
 
     def test_easy_ai_answers_the_center_gambit(self):
         game = Game()
@@ -50,6 +52,41 @@ class AITests(unittest.TestCase):
         )
 
         self.assertFalse(opponent_can_win_immediately)
+
+    def test_ultra_sees_past_the_known_hard_horizon_blunder(self):
+        game = Game()
+        state = game.initial_state()
+        setup = [
+            (4, 1, "/"),
+            (8, 1, "\\"),
+            (4, 7, "\\"),
+            (0, 0, "/"),
+            (1, 7, "\\"),
+            (0, 1, "\\"),
+            (1, 2, "\\"),
+            (0, 2, "\\"),
+            (0, 6, "\\"),
+            (1, 6, "/"),
+            (2, 7, "\\"),
+            (2, 5, "/"),
+            (3, 7, "/"),
+            (7, 0, "\\"),
+            (5, 0, "/"),
+            (2, 2, "/"),
+            (3, 4, "/"),
+            (3, 2, "\\"),
+            (2, 3, "\\"),
+            (0, 7, "/"),
+            (4, 3, "/"),
+        ]
+        for row, col, mirror in setup:
+            state = game.resolve_move(state, Move(row, col, Cell(mirror))).state
+
+        result = ComputerAI(game).choose_move(state, "ultra")
+
+        self.assertGreaterEqual(result.depth, 4)
+        self.assertIn(result.move, game.legal_moves(state))
+        self.assertNotEqual(result.move, Move(0, 8, Cell.MIRROR_SLASH))
 
 
 if __name__ == "__main__":

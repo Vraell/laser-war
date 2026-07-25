@@ -1,10 +1,11 @@
-import { BOARD_SIZE, Cell, Game, chooseComputerMove, cloneState } from "./engine.js";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./archive.js";
+} from "./save.js";
+import { loadProgress, recordResult, saveProgress } from "./progress.js";
 
 const SAVE_KEY = "laser-war.web.v1";
 const game = new Game();
@@ -27,18 +28,27 @@ const elements = {
   pauseOverlay: document.querySelector("#pause-overlay"),
   resultOverlay: document.querySelector("#result-overlay"),
   resultTitle: document.querySelector("#result-title"),
+  resultDetail: document.querySelector("#result-detail"),
   toast: document.querySelector("#toast"),
   rules: document.querySelector("#rules-dialog"),
   sound: document.querySelector("#sound-toggle"),
+  ultraDifficulty: document.querySelector("#ultra-difficulty"),
+  ultraState: document.querySelector("#ultra-state"),
+  progressNote: document.querySelector("#progress-note"),
 };
 
 let session = createSession();
+let progress = loadProgress(localStorage);
 let selectedMirror = Cell.SLASH;
 let legalMoves = [];
 let inputLocked = false;
 let paused = false;
 let lastOutcome = null;
 let toastTimer = 0;
+let aiWorker = null;
+let aiRequestId = 0;
+let aiTimer = 0;
+let ultraUnlockedThisMatch = false;
 
 function createSession(
   mode = "computer",
@@ -54,7 +64,6 @@ function createSession(
     state: game.initialState(),
     history: [],
     redo: [],
-    events: [],
   };
 }
 
@@ -74,12 +83,15 @@ function computerTurn() {
 }
 
 function currentDifficulty() {
-  return document.querySelector('input[name="difficulty"]:checked').value;
+  const selected = document.querySelector('input[name="difficulty"]:checked')?.value || "medium";
+  return selected === "ultra" && !progress.ultraUnlocked ? "hard" : selected;
 }
 
 function startGame(mode, difficulty = currentDifficulty(), persist = true) {
+  cancelComputerTurn();
   session = createSession(mode, difficulty);
   lastOutcome = null;
+  ultraUnlockedThisMatch = false;
   startGameView();
   if (persist) saveGame();
 }
@@ -106,7 +118,6 @@ function playMove(move, actor) {
   };
   session.history.push(record);
   session.redo = [];
-  session.events.push(eventForRecord(record));
   lastOutcome = outcome;
   inputLocked = true;
   refreshLegalMoves();
@@ -114,8 +125,10 @@ function playMove(move, actor) {
   renderBeams(outcome.beams);
   audio.play(outcome.destroyed.length ? "impact" : "laser");
   saveGame();
+  const matchId = session.id;
 
   window.setTimeout(() => {
+    if (session.id !== matchId || elements.gameScreen.hidden) return;
     inputLocked = false;
     render();
     if (session.state.winner || session.state.draw) {
@@ -128,27 +141,70 @@ function playMove(move, actor) {
 }
 
 function beginComputerTurn() {
-  if (!computerTurn() || inputLocked) return;
+  if (elements.gameScreen.hidden || !computerTurn() || inputLocked) return;
+  cancelComputerTurn();
   inputLocked = true;
   elements.status.textContent = "Computer thinking";
   elements.statusLight.style.background = "var(--cyan)";
-  elements.aiDetail.textContent = "Analyzing legal paths…";
+  elements.statusLight.style.color = "var(--cyan)";
+  elements.aiDetail.classList.add("thinking");
+  const started = performance.now();
+  const difficulty = session.difficulty;
+  elements.aiDetail.textContent = difficulty === "ultra"
+    ? "Ultra · mapping four-ply threats"
+    : `${title(difficulty)} · analyzing legal paths`;
   renderBoard();
+  aiTimer = window.setInterval(() => {
+    const elapsed = (performance.now() - started) / 1000;
+    elements.aiDetail.textContent = difficulty === "ultra"
+      ? `Ultra · depth search · ${elapsed.toFixed(1)}s`
+      : `${title(difficulty)} · analyzing · ${elapsed.toFixed(1)}s`;
+  }, 250);
 
-  window.setTimeout(() => {
-    const result = chooseComputerMove(game, session.state, session.difficulty);
+  const requestId = ++aiRequestId;
+  aiWorker = new Worker("./ai_worker.js", { type: "module" });
+  aiWorker.addEventListener("message", ({ data }) => {
+    if (data.requestId !== requestId || requestId !== aiRequestId) return;
+    finishComputerTurn(data.result);
+  });
+  aiWorker.addEventListener("error", () => {
+    if (requestId !== aiRequestId) return;
+    cancelComputerTurn();
     inputLocked = false;
-    if (!result.move) {
-      session.state.draw = true;
-      saveGame();
-      render();
-      showResult();
-      return;
-    }
-    elements.aiDetail.textContent =
-      `AI · ${result.nodes.toLocaleString()} positions · ${Math.round(result.elapsed)} ms`;
-    playMove(result.move, "Computer");
-  }, 80);
+    render();
+    showToast("Computer search failed. Start a new match to continue.");
+  });
+  aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
+}
+
+function finishComputerTurn(result) {
+  cancelComputerTurn(false);
+  inputLocked = false;
+  if (!computerTurn()) return;
+  if (!result.move) {
+    session.state.draw = true;
+    saveGame();
+    render();
+    showResult();
+    return;
+  }
+  elements.aiDetail.classList.remove("thinking");
+  elements.aiDetail.textContent =
+    `AI · depth ${result.depth} · ${result.nodes.toLocaleString()} positions · ${formatElapsed(result.elapsed)}`;
+  playMove(result.move, "Computer");
+}
+
+function cancelComputerTurn(invalidate = true) {
+  if (invalidate) aiRequestId += 1;
+  window.clearInterval(aiTimer);
+  aiTimer = 0;
+  aiWorker?.terminate();
+  aiWorker = null;
+  elements.aiDetail?.classList.remove("thinking");
+}
+
+function formatElapsed(milliseconds) {
+  return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(1)} s` : `${Math.round(milliseconds)} ms`;
 }
 
 function refreshLegalMoves() {
@@ -252,6 +308,7 @@ function renderStatus() {
   }
   elements.status.textContent = text;
   elements.statusLight.style.background = color;
+  elements.statusLight.style.color = color;
 }
 
 function renderLog() {
@@ -282,20 +339,6 @@ function recordSummary(record) {
   return `${record.actor}: ${record.move.mirror} at R${record.move.row + 1}C${record.move.col + 1} · ${effects.join(", ") || "no damage"}`;
 }
 
-function eventForRecord(record, type = "move") {
-  return {
-    type,
-    at: new Date().toISOString(),
-    number: record.number,
-    actor: record.actor,
-    row: record.move.row,
-    col: record.move.col,
-    mirror: record.move.mirror,
-    destroyed: record.outcome.destroyed.map(([row, col]) => [row, col]),
-    hitKings: [...record.outcome.hitKings].sort(),
-  };
-}
-
 function renderBeams(beams) {
   clearBeams();
   beams.forEach((beam, index) => {
@@ -318,26 +361,43 @@ function clearBeams() {
 }
 
 function showResult() {
+  if (
+    !ultraUnlockedThisMatch
+    && recordResult(progress, {
+      mode: session.mode,
+      difficulty: session.difficulty,
+      winner: session.state.winner,
+    })
+  ) {
+    ultraUnlockedThisMatch = true;
+    saveProgress(localStorage, progress);
+    updateProgressUI();
+  }
   elements.resultOverlay.hidden = false;
   if (session.state.draw) {
     elements.resultTitle.textContent = "DRAW";
     elements.resultTitle.style.color = "var(--ink)";
+    elements.resultDetail.textContent = `${session.history.length} moves · neither king survives`;
   } else if (session.mode === "computer") {
     const victory = session.state.winner === "bottom";
     elements.resultTitle.textContent = victory ? "VICTORY" : "DEFEAT";
     elements.resultTitle.style.color = victory ? "var(--amber)" : "var(--cyan)";
+    elements.resultDetail.textContent = ultraUnlockedThisMatch
+      ? "Ultra difficulty unlocked"
+      : `${title(session.difficulty)} · ${session.history.length} moves`;
   } else {
     elements.resultTitle.textContent = `${session.state.winner.toUpperCase()} WINS`;
     elements.resultTitle.style.color = session.state.winner === "bottom" ? "var(--amber)" : "var(--cyan)";
+    elements.resultDetail.textContent = `${session.history.length} moves`;
   }
   audio.play("victory");
 }
 
 function undo() {
   if (inputLocked || !session.history.length) return;
+  cancelComputerTurn();
   const record = session.history.pop();
   session.redo.push(record);
-  session.events.push({ type: "undo", at: new Date().toISOString(), number: record.number });
   session.state = cloneState(record.before);
   lastOutcome = null;
   elements.resultOverlay.hidden = true;
@@ -350,6 +410,7 @@ function undo() {
 
 function redo() {
   if (inputLocked || !session.redo.length) return;
+  cancelComputerTurn();
   const old = session.redo.pop();
   let outcome;
   try {
@@ -369,7 +430,6 @@ function redo() {
   };
   session.history.push(record);
   session.state = outcome.state;
-  session.events.push(eventForRecord(record, "redo"));
   lastOutcome = outcome;
   refreshLegalMoves();
   render();
@@ -387,6 +447,7 @@ function restart() {
 }
 
 function returnToMenu() {
+  cancelComputerTurn();
   inputLocked = false;
   paused = false;
   elements.pauseOverlay.hidden = true;
@@ -397,7 +458,7 @@ function returnToMenu() {
 }
 
 function togglePause() {
-  if (elements.gameScreen.hidden || session.state.winner || session.state.draw) return;
+  if (elements.gameScreen.hidden || inputLocked || session.state.winner || session.state.draw) return;
   paused = !paused;
   elements.pauseOverlay.hidden = !paused;
   renderBoard();
@@ -442,9 +503,6 @@ function sessionFromSave(data) {
       outcome,
     });
   }
-  restored.events = Array.isArray(data.events)
-    ? data.events
-    : restored.history.map((record) => eventForRecord(record));
   return restored;
 }
 
@@ -452,6 +510,11 @@ function continueGame() {
   try {
     const data = JSON.parse(localStorage.getItem(SAVE_KEY));
     session = sessionFromSave(data);
+    if (session.difficulty === "ultra" && !progress.ultraUnlocked) {
+      progress.ultraUnlocked = true;
+      saveProgress(localStorage, progress);
+      updateProgressUI();
+    }
     startGameView();
     lastOutcome = session.history.at(-1)?.outcome || null;
     saveGame();
@@ -480,9 +543,19 @@ function startGameView() {
   elements.resultOverlay.hidden = true;
   elements.modeLabel.textContent =
     session.mode === "computer" ? `VS COMPUTER · ${session.difficulty.toUpperCase()}` : "LOCAL TWO PLAYER";
+  elements.aiDetail.textContent = "";
   refreshLegalMoves();
   clearBeams();
   render();
+}
+
+function updateProgressUI() {
+  elements.ultraDifficulty.disabled = !progress.ultraUnlocked;
+  elements.ultraState.textContent = progress.ultraUnlocked ? "READY" : "LOCKED";
+  elements.progressNote.textContent = progress.ultraUnlocked
+    ? "Ultra is ready. Expect a longer, deeper search."
+    : "Defeat Hard to unlock Ultra.";
+  elements.progressNote.classList.toggle("unlocked", progress.ultraUnlocked);
 }
 
 function migrateStoredSave() {
@@ -612,6 +685,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 migrateStoredSave();
+updateProgressUI();
 elements.continueButton.disabled = !hasSave();
 window.__laserWar = {
   game,

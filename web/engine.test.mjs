@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { Cell, Game, chooseComputerMove } from "./engine.js";
+import { chooseComputerMove } from "./ai.js";
+import { Cell, Game } from "./engine.js";
 
 const game = new Game();
 const initial = game.initialState();
@@ -65,26 +66,26 @@ for (const [row, col, mirror] of strandingSetup) {
 assert.equal(game.isLegalMove(strandingState, { row: 0, col: 7, mirror: "\\" }), false);
 
 const tacticalGame = {
-  legalMoves(state) {
+  legalChildren(state) {
     if (state.kind === "root") {
-      return Array.from({ length: 16 }, (_, index) => ({ index }));
+      return Array.from({ length: 16 }, (_, index) => ({
+        move: { index },
+        state: { kind: "candidate", index, turn: "bottom", winner: null, draw: false },
+      }));
     }
-    if (state.kind === "candidate") return [{ reply: true }];
+    if (state.kind === "candidate") {
+      return [{
+        move: { reply: true },
+        state: {
+          kind: "reply",
+          index: state.index,
+          turn: "top",
+          winner: state.index === 14 ? "bottom" : null,
+          draw: false,
+        },
+      }];
+    }
     return [];
-  },
-  resolveMove(state, move) {
-    if (state.kind === "root") {
-      return { state: { kind: "candidate", index: move.index, turn: "bottom", winner: null, draw: false } };
-    }
-    return {
-      state: {
-        kind: "reply",
-        index: state.index,
-        turn: "top",
-        winner: state.index === 14 ? "bottom" : null,
-        draw: false,
-      },
-    };
   },
   evaluate(state) {
     if (state.kind === "candidate") return -(100 - state.index);

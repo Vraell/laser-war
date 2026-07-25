@@ -62,11 +62,20 @@ export class Game {
   }
 
   legalMoves(state) {
-    const moves = [];
+    return this.legalChildren(state).map(({ move }) => move);
+  }
+
+  legalChildren(state) {
+    const children = [];
     for (const move of this.pseudoMoves(state)) {
-      if (this.isLegalMove(state, move)) moves.push(move);
+      try {
+        const child = this.resolveMove(state, move, false).state;
+        children.push({ move, state: child });
+      } catch {
+        // Pseudo moves still need king-path and laser-path validation.
+      }
     }
-    return moves;
+    return children;
   }
 
   isLegalMove(state, move) {
@@ -302,90 +311,6 @@ export class Game {
   inBounds(row, col) {
     return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
   }
-}
-
-function scoreForTop(game, state) {
-  return state.turn === "top" ? game.evaluate(state) : -game.evaluate(state);
-}
-
-export function chooseComputerMove(game, state, difficulty = "medium") {
-  const started = performance.now();
-  const legal = game.legalMoves(state);
-  if (!legal.length) return { move: null, score: 0, nodes: 0, elapsed: 0 };
-  let nodes = 0;
-  const ranked = legal.map((move) => {
-    const child = game.resolveMove(state, move, false).state;
-    nodes += 1;
-    return { move, state: child, score: scoreForTop(game, child) };
-  }).sort((left, right) => right.score - left.score);
-
-  if (difficulty === "easy") {
-    const pool = ranked.slice(0, Math.min(8, ranked.length));
-    const picked = pool[Math.floor(Math.random() * pool.length)];
-    return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
-  }
-
-  const deadline = started + (difficulty === "hard" ? 500 : 140);
-  const minimumCandidates = difficulty === "hard" ? 24 : 6;
-  const analyzed = [];
-  for (const candidate of ranked) {
-    if (candidate.state.winner === "top") {
-      return { move: candidate.move, score: 10000, nodes, elapsed: performance.now() - started };
-    }
-    if (candidate.state.winner || candidate.state.draw) {
-      analyzed.push(candidate);
-      continue;
-    }
-    if (performance.now() >= deadline && analyzed.length >= 1) break;
-    let worstReply = Infinity;
-    let complete = true;
-    const replies = game.legalMoves(candidate.state);
-    if (!replies.length) worstReply = 0;
-    for (const reply of replies) {
-      if (performance.now() >= deadline && analyzed.length >= 1) {
-        complete = false;
-        break;
-      }
-      const replyState = game.resolveMove(candidate.state, reply, false).state;
-      nodes += 1;
-      worstReply = Math.min(worstReply, scoreForTop(game, replyState));
-      if (replyState.winner === "bottom") {
-        worstReply = -10000;
-        complete = true;
-        break;
-      }
-    }
-    if (complete) {
-      candidate.score = worstReply;
-      analyzed.push(candidate);
-    }
-    const safeCandidates = analyzed.filter((item) => item.score > -10000).length;
-    if (analyzed.length >= minimumCandidates && safeCandidates >= 3) break;
-  }
-
-  if (analyzed.length) {
-    analyzed.sort((left, right) => right.score - left.score);
-    ranked.splice(0, ranked.length, ...analyzed);
-  }
-
-  if (difficulty === "hard") {
-    const picked = ranked[0];
-    return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
-  }
-
-  if (!analyzed.length) {
-    for (const candidate of ranked.slice(0, 3)) {
-      const replies = game.legalMoves(candidate.state);
-      if (replies.some((reply) => game.resolveMove(candidate.state, reply, false).state.winner === "bottom")) {
-        candidate.score = -10000;
-      }
-    }
-    ranked.sort((left, right) => right.score - left.score);
-  }
-
-  const poolSize = Math.min(3, ranked.length);
-  const picked = ranked[Math.floor(Math.random() * poolSize)];
-  return { move: picked.move, score: picked.score, nodes, elapsed: performance.now() - started };
 }
 
 export { cloneState };

@@ -19,15 +19,17 @@ python3.11 -m laser_war
 
 The game includes:
 
-- computer opponents with Easy, Medium, and Hard search profiles;
+- computer opponents with Easy, Medium, Hard, and unlockable Ultra search profiles;
 - local two-player mode;
 - scalable 60 FPS rendering;
 - animated simultaneous lasers, impacts, particles, and synthesized sound;
 - legal-move highlighting and forbidden-square markings;
 - symmetric anti-fortress rules that keep both kings and both lasers viable;
 - pause, undo, redo, restart, autosave, and continue;
-- a validated, scrollable match history with damage events;
+- a validated recent-match history with damage events;
 - a scrollable current-match log with one-click clipboard copying.
+
+Ultra unlocks after the player defeats the Hard computer. Progress is stored locally on each device.
 
 The interface uses the bundled Inter typeface under the SIL Open Font License.
 
@@ -66,8 +68,9 @@ The static site is written to `build/web`. It is a small HTML, CSS, and JavaScri
 same board, laser, damage, king-safety, and anti-fortress rules as the Python engine without a WebAssembly
 startup delay.
 
-The rules engine is independent of Pygame. `session.py` owns reversible match history and saves, `ai.py` owns
-time-bounded search, and `pygame_app.py` owns presentation and input.
+The rules engine is independent of Pygame. `session.py` owns reversible match history and saves, `progress.py`
+owns unlock progression, `ai.py` owns time-bounded search, and `pygame_app.py` owns presentation and input.
+The browser runs computer searches in a Web Worker so deeper searches do not block touch or rendering.
 
 The Python client updates one JSON record per match after every move. On macOS these records are stored in
 `~/Library/Application Support/Laser War/matches/`; equivalent per-user application-data directories are used

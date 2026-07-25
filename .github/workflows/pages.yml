@@ -36,6 +36,8 @@ jobs:
         run: |
           python -m unittest discover -v
           node web/engine.test.mjs
+          node web/progress.test.mjs
+          node web/ultra.test.mjs
 
       - name: Build browser game
         run: ./scripts/build_web.sh
