@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.10.1";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
