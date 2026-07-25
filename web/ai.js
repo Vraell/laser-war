@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.6";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.7";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
@@ -294,7 +294,8 @@ export class UltraSearch {
     const branchLimit = this.profile.branchLimits[
       Math.min(Math.max(0, ply - 1), this.profile.branchLimits.length - 1)
     ];
-    children = this.strictSubset(state, children, branchLimit);
+    const kingExposed = this.game.fireLasers(state.board).some((beam) => beam.hitKing);
+    children = this.strictSubset(state, children, branchLimit, kingExposed);
     if (!children.length) return 0;
 
     let value = -Infinity;
@@ -343,20 +344,20 @@ export class UltraSearch {
   }
 
   /** Select the highest-ranked fully legal children up to one branch limit. */
-  strictSubset(state, children, limit) {
+  strictSubset(state, children, limit, allowExact = false) {
     const key = this.keyForState(state);
     if (this.strictChildren.has(key)) return children.slice(0, limit);
     const selected = [];
     for (const item of children) {
       this.checkInterrupted();
-      if (this.strictChild(state, item.move, item.state)) selected.push(item);
+      if (this.strictChild(state, item.move, item.state, allowExact)) selected.push(item);
       if (selected.length === limit) break;
     }
     return selected;
   }
 
   /** Return a fully legal child while sharing exact validator results. */
-  strictChild(state, move, fastChild = null) {
+  strictChild(state, move, fastChild = null, allowExact = true) {
     const key = this.keyForState(state);
     if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
     const legality = this.legalityCache.get(key);
@@ -364,8 +365,10 @@ export class UltraSearch {
     if (legality.get(keyForMove) === false) return null;
     if (legality.get(keyForMove) === true && fastChild) return fastChild;
     if (fastChild) {
-      const legal = this.game.jointPathPreserved(state.board, fastChild.board, move);
-      legality.set(keyForMove, legal);
+      const legal = allowExact
+        ? this.game.jointPathPreserved(state.board, fastChild.board, move)
+        : this.game.jointPathPreservedFast(state.board, fastChild.board, move);
+      if (legal || allowExact) legality.set(keyForMove, legal);
       return legal ? fastChild : null;
     }
     try {
@@ -408,7 +411,7 @@ export class UltraSearch {
     const opponent = state.turn === "top" ? "bottom" : "top";
     const apparentSurvivals = this.orderedChildren(state, ply)
       .filter(({ state: child }) => child.winner !== opponent);
-    const children = this.strictSubset(state, apparentSurvivals, 8);
+    const children = this.strictSubset(state, apparentSurvivals, 8, true);
     let best = -Infinity;
     for (const { state: child } of children) {
       this.checkInterrupted();

@@ -1,4 +1,4 @@
-import MiniSat from "./minisat.js?v=0.11.6";
+import MiniSat from "./minisat.js?v=0.11.7";
 
 const BOARD_SIZE = 9;
 const EMPTY = ".";
@@ -76,7 +76,9 @@ class SatFormula {
   /** Solve only this formula while retaining learned clauses globally. */
   solve() {
     solver.ensureVar(nextVariable - 1);
-    return solver.solveAssuming(this.activation) ? solver.getSolution() : null;
+    const solution = solver.solveAssuming(this.activation) ? solver.getSolution() : null;
+    solver.retireVar(this.activation);
+    return solution;
   }
 }
 

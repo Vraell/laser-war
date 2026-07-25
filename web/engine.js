@@ -1,4 +1,4 @@
-import { exactJointPathWitness } from "./exact_routes.js?v=0.11.6";
+import { exactJointPathWitness } from "./exact_routes.js?v=0.11.7";
 
 export const BOARD_SIZE = 9;
 export const MIDDLE_ROW = 4;
@@ -373,18 +373,52 @@ export class Game {
     return false;
   }
 
-  /** Return cached compatible assignments or discover the first one. */
-  jointPathWitnesses(board) {
-    const boardKey = this.boardKey(board);
-    if (this.jointReachabilityCache.has(boardKey)) return this.jointReachabilityCache.get(boardKey);
-    let witness = null;
+  /** Prove a speculative child with cached or bounded witnesses only. */
+  jointPathPreservedFast(parentBoard, childBoard, move) {
+    const parentKey = this.boardKey(parentBoard);
+    let witnesses = this.jointReachabilityCache.get(parentKey);
+    if (witnesses === undefined) {
+      const parentWitness = this.fastJointPathWitness(parentBoard);
+      witnesses = parentWitness ? [parentWitness] : null;
+      if (witnesses) this.cacheJointWitnesses(parentBoard, witnesses);
+    }
+    if (witnesses) {
+      const squareBit = 1n << BigInt(move.row * BOARD_SIZE + move.col);
+      for (const witness of witnesses) {
+        const conflicts = Boolean(witness.empty & squareBit)
+          || (Boolean(witness.slash & squareBit) && move.mirror !== Cell.SLASH)
+          || (Boolean(witness.backslash & squareBit) && move.mirror !== Cell.BACKSLASH);
+        if (!conflicts) {
+          this.cacheJointWitnesses(childBoard, [witness]);
+          return true;
+        }
+      }
+    }
+
+    const learned = this.fastJointPathWitness(childBoard);
+    if (!learned) return false;
+    this.cacheJointWitnesses(childBoard, [learned]);
+    if (witnesses) this.cacheJointWitnesses(parentBoard, [...witnesses, learned]);
+    return true;
+  }
+
+  /** Find one compatible witness within the bounded fast-search horizon. */
+  fastJointPathWitness(board) {
     for (const targets of [
       ["top", "bottom"],
       ["bottom", "top"],
     ]) {
-      witness = this.jointPairingWitness(board, targets);
-      if (witness) break;
+      const witness = this.jointPairingWitness(board, targets);
+      if (witness) return witness;
     }
+    return null;
+  }
+
+  /** Return cached compatible assignments or discover the first one. */
+  jointPathWitnesses(board) {
+    const boardKey = this.boardKey(board);
+    if (this.jointReachabilityCache.has(boardKey)) return this.jointReachabilityCache.get(boardKey);
+    let witness = this.fastJointPathWitness(board);
     if (!witness) {
       witness = exactJointPathWitness(board, this.sources, this.mirrorForbiddenSquares(board));
     }

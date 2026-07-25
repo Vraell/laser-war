@@ -197,6 +197,30 @@ assert.ok(
   < counterplaySearch.strategicEvaluation(loggedMove) - 250,
 );
 
+const freezeFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_freeze_13_move_log.json", import.meta.url),
+));
+const freezeGame = new Game();
+let freezeState = freezeGame.initialState();
+for (const [row, col, mirror] of freezeFixture.moves) {
+  freezeState = freezeGame.resolveMove(freezeState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const freezeSearch = new UltraSearch(freezeGame, () => performance.now(), {
+  timeLimit: 3500,
+  maxDepth: 3,
+  rootLimit: 16,
+  branchLimits: [14, 10, 7],
+});
+const freezeStarted = performance.now();
+const freezeResult = freezeSearch.choose(freezeState);
+assert.ok(performance.now() - freezeStarted < 3500, "Ultra exceeded the freeze regression budget.");
+assert.ok(freezeResult.depth >= 2, "Ultra should search beyond its fallback in the reported position.");
+assert.ok(freezeGame.isLegalMove(freezeState, freezeResult.move));
+
 const filteredSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 filteredSearch.orderedChildren = () => [{
   move: { row: 0, col: 0, mirror: "/" },

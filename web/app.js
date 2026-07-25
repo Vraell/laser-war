@@ -1,19 +1,19 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.6";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.7";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.6";
+} from "./save.js?v=0.11.7";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.6";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.6";
-import { beamPoints } from "./beam.js?v=0.11.6";
-import { drawDetailKey } from "./result.js?v=0.11.6";
+} from "./progress.js?v=0.11.7";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.7";
+import { beamPoints } from "./beam.js?v=0.11.7";
+import { drawDetailKey } from "./result.js?v=0.11.7";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -208,7 +208,7 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.11.6", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.11.7", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
     if (data.type === "progress") {
