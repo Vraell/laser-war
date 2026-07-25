@@ -40,6 +40,16 @@ The arena reports win/draw/loss results, estimated Elo change with a 95% interva
 search time. The Pages workflow runs a bounded arena before every deployment and rejects statistically supported
 strength regressions.
 
+Analyze a copied English or French match log with a wider offline Ultra search:
+
+```bash
+node scripts/analyze_match.mjs path/to/match-log.txt --jobs 4
+```
+
+The analyzer validates and replays the match, compares every played move with its preferred continuation, then
+deepens the largest candidate mistakes. It writes an interactive evaluation chart, board explorer, and
+machine-readable JSON to `artifacts/`. Use `--depth`, `--refine`, and `--refine-depth` to adjust the analysis.
+
 Build and validate the GitHub Pages artifact:
 
 ```bash
