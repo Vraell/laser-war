@@ -17,9 +17,6 @@ const elements = {
   continueButton: document.querySelector("#continue-game"),
   slash: document.querySelector("#select-slash"),
   backslash: document.querySelector("#select-backslash"),
-  undo: document.querySelector("#undo"),
-  redo: document.querySelector("#redo"),
-  pause: document.querySelector("#pause"),
   pauseOverlay: document.querySelector("#pause-overlay"),
   resultOverlay: document.querySelector("#result-overlay"),
   resultTitle: document.querySelector("#result-title"),
@@ -159,8 +156,6 @@ function render() {
   renderLog();
   elements.slash.classList.toggle("selected", selectedMirror === Cell.SLASH);
   elements.backslash.classList.toggle("selected", selectedMirror === Cell.BACKSLASH);
-  elements.undo.disabled = inputLocked || !session.history.length;
-  elements.redo.disabled = inputLocked || !session.redo.length;
 }
 
 function renderBoard() {
@@ -207,6 +202,7 @@ function pieceFor(value) {
   } else {
     piece.classList.add("king");
     piece.style.setProperty("--king-color", value === Cell.TOP_KING ? "var(--cyan)" : "var(--amber)");
+    piece.style.setProperty("--king-fill", value === Cell.TOP_KING ? "#176f82" : "#8b5a12");
   }
   return piece;
 }
@@ -506,9 +502,6 @@ document.querySelector("#start-local").addEventListener("click", () => startGame
 elements.continueButton.addEventListener("click", continueGame);
 elements.slash.addEventListener("click", () => selectMirror(Cell.SLASH));
 elements.backslash.addEventListener("click", () => selectMirror(Cell.BACKSLASH));
-elements.undo.addEventListener("click", undo);
-elements.redo.addEventListener("click", redo);
-elements.pause.addEventListener("click", togglePause);
 document.querySelector("#resume").addEventListener("click", togglePause);
 document.querySelector("#pause-restart").addEventListener("click", restart);
 document.querySelector("#pause-menu").addEventListener("click", returnToMenu);
