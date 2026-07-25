@@ -1,13 +1,13 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.10.1";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.10.2";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.10.1";
-import { loadProgress, recordResult, saveProgress } from "./progress.js?v=0.10.1";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.10.1";
-import { beamPoints } from "./beam.js?v=0.10.1";
+} from "./save.js?v=0.10.2";
+import { loadProgress, recordResult, saveProgress } from "./progress.js?v=0.10.2";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.10.2";
+import { beamPoints } from "./beam.js?v=0.10.2";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -208,7 +208,7 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.10.1", { type: "module" });
+  aiWorker = new Worker("./ai_worker.js?v=0.10.2", { type: "module" });
   aiWorker.addEventListener("message", ({ data }) => {
     if (data.requestId !== requestId || requestId !== aiRequestId) return;
     finishComputerTurn(data.result);
