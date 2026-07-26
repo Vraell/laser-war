@@ -165,7 +165,6 @@ assert.equal(
   routePressureScore(controlledRoutes, "top", "bottom"),
   -routePressureScore(controlledRoutes, "bottom", "top"),
 );
-
 const earlyLossFixture = JSON.parse(readFileSync(
   new URL("./fixtures/ultra_loss_10_move_log.json", import.meta.url),
 ));
@@ -221,6 +220,53 @@ assert.ok(performance.now() - freezeStarted < 3500, "Ultra exceeded the freeze r
 assert.ok(freezeResult.depth >= 2, "Ultra should search beyond its fallback in the reported position.");
 assert.ok(freezeGame.isLegalMove(freezeState, freezeResult.move));
 
+const rootPruningFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_root_pruning_31_move_log.json", import.meta.url),
+));
+let rootPruningState = game.initialState();
+for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
+  rootPruningState = game.resolveMove(rootPruningState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const narrowRootSearch = new UltraSearch(game, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 2,
+  rootLimit: 16,
+  branchLimits: [14, 10, 7],
+  includeForcingRoots: false,
+});
+assert.deepEqual(
+  narrowRootSearch.choose(rootPruningState).move,
+  { row: 2, col: 2, mirror: "/" },
+);
+const threatAwareRootSearch = new UltraSearch(game, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 2,
+  rootLimit: 16,
+  branchLimits: [14, 10, 7],
+});
+assert.deepEqual(
+  threatAwareRootSearch.choose(rootPruningState).move,
+  { row: 2, col: 0, mirror: "/" },
+);
+assert.equal(
+  threatAwareRootSearch.shouldExtendSearch(
+    { move: { row: 2, col: 2, mirror: "/" }, score: 272 },
+    { move: { row: 5, col: 1, mirror: "\\" }, score: -27 },
+  ),
+  true,
+);
+assert.equal(
+  threatAwareRootSearch.shouldExtendSearch(
+    { move: { row: 5, col: 1, mirror: "\\" }, score: -20 },
+    { move: { row: 5, col: 1, mirror: "\\" }, score: -35 },
+  ),
+  false,
+);
+
 const filteredSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 filteredSearch.orderedChildren = () => [{
   move: { row: 0, col: 0, mirror: "/" },
@@ -231,10 +277,16 @@ assert.equal(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infi
 
 const productionSearch = new UltraSearch(game, () => 0);
 assert.ok(productionSearch.profile.maxDepth >= 8);
+assert.equal(productionSearch.profile.rootLimit, 16);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
   softDeadline: 2250,
 });
+const lateTimingState = game.initialState();
+for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
+  lateTimingState.board[row - 1][col - 1] = mirror;
+}
+assert.equal(productionSearch.softTiming(lateTimingState, 0).latePosition, true);
 
 console.log(
   `Ultra horizon check passed at depth ${result.depth} `

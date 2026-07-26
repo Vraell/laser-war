@@ -15,17 +15,39 @@ function parseArguments(argv) {
     pairs: 4,
     maxPlies: 54,
     baselineRef: process.env.CI ? "HEAD^" : "HEAD",
+    difficulties,
+    openingPlies: 2,
+    seedOffset: 0,
+    ultraTime: 300,
+    verbose: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--pairs") options.pairs = Number(argv[++index]);
     else if (argument === "--max-plies") options.maxPlies = Number(argv[++index]);
     else if (argument === "--baseline-ref") options.baselineRef = argv[++index];
+    else if (argument === "--difficulties") options.difficulties = argv[++index].split(",");
+    else if (argument === "--opening-plies") options.openingPlies = Number(argv[++index]);
+    else if (argument === "--seed-offset") options.seedOffset = Number(argv[++index]);
+    else if (argument === "--ultra-time") options.ultraTime = Number(argv[++index]);
+    else if (argument === "--verbose") options.verbose = true;
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (!Number.isInteger(options.pairs) || options.pairs < 1) throw new Error("--pairs must be positive.");
   if (!Number.isInteger(options.maxPlies) || options.maxPlies < 1) {
     throw new Error("--max-plies must be positive.");
+  }
+  if (!options.difficulties.length || options.difficulties.some(
+    (difficulty) => !difficulties.includes(difficulty),
+  )) {
+    throw new Error("--difficulties must contain easy, medium, hard, and/or ultra.");
+  }
+  if (!Number.isInteger(options.openingPlies) || options.openingPlies < 0) {
+    throw new Error("--opening-plies must be non-negative.");
+  }
+  if (!Number.isInteger(options.seedOffset)) throw new Error("--seed-offset must be an integer.");
+  if (!Number.isFinite(options.ultraTime) || options.ultraTime < 50) {
+    throw new Error("--ultra-time must be at least 50 milliseconds.");
   }
   return options;
 }
@@ -40,15 +62,25 @@ function randomSource(initialSeed) {
 }
 
 /** Load one AI revision as an isolated module using the current rules engine. */
-async function loadAiRevision(label, source) {
+async function loadAiRevision(label, source, ultraTime) {
   const directory = mkdtempSync(join(tmpdir(), `laser-war-${label}-`));
   const engineUrl = pathToFileURL(join(projectRoot, "web", "engine.js")).href;
+  const timingScale = ultraTime / 6000;
+  const scaledTiming = [6000, 4750, 3500, 2250].map(
+    (milliseconds) => Math.max(50, Math.round(milliseconds * timingScale)),
+  );
+  const reserve = Math.max(5, Math.round(150 * timingScale));
   const instrumented = source
     .replace(
       /from\s+["']\.\/engine\.js(?:\?v=[^"']+)?["']/,
       `from ${JSON.stringify(engineUrl)}`,
     )
-    .replace(/timeLimit:\s*6000/, "timeLimit: 300")
+    .replace(/timeLimit:\s*6000/, `timeLimit: ${ultraTime}`)
+    .replace("this.profile.timeLimit - 150", `this.profile.timeLimit - ${reserve}`)
+    .replace(
+      /const softLimit = latePosition \? 6000 : tacticalEmergency \? 4750 : mirrors >= 12 \? 3500 : 2250;/,
+      `const softLimit = latePosition ? ${scaledTiming[0]} : tacticalEmergency ? ${scaledTiming[1]} : mirrors >= 12 ? ${scaledTiming[2]} : ${scaledTiming[3]};`,
+    )
     .replaceAll("performance.now()", "globalThis.__laserWarArenaNow()");
   const modulePath = join(directory, "ai.mjs");
   writeFileSync(modulePath, instrumented);
@@ -96,11 +128,11 @@ function chooseMove(revision, difficulty, game, state, random) {
 }
 
 /** Build one deterministic legal opening shared by both games in a pair. */
-function openingState(seed) {
+function openingState(seed, plies) {
   const game = new Game();
   const random = randomSource(seed);
   let state = game.initialState();
-  for (let ply = 0; ply < 2; ply += 1) {
+  for (let ply = 0; ply < plies; ply += 1) {
     const children = game.legalChildren(state);
     if (!children.length) break;
     state = children[Math.floor(random() * children.length)].state;
@@ -125,6 +157,7 @@ function playGame({
     candidate: { nodes: 0, wallMilliseconds: 0, moves: 0 },
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
   };
+  const moves = [];
 
   for (let ply = 0; ply < maxPlies && !state.winner && !state.draw; ply += 1) {
     const owner = state.turn === candidateSide ? "candidate" : "baseline";
@@ -138,15 +171,23 @@ function playGame({
         score: owner === "candidate" ? 0 : 1,
         illegal: owner,
         telemetry,
+        moves,
       };
     }
+    moves.push({
+      owner,
+      side: state.turn,
+      move: result.move,
+      depth: result.depth,
+      score: result.score,
+    });
     state = game.resolveMove(state, result.move).state;
   }
 
   const score = state.draw || !state.winner
     ? 0.5
     : state.winner === candidateSide ? 1 : 0;
-  return { score, illegal: null, telemetry };
+  return { score, illegal: null, telemetry, moves };
 }
 
 /** Convert a bounded score rate to the conventional Elo difference. */
@@ -184,7 +225,10 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
   };
   for (let pair = 0; pair < options.pairs; pair += 1) {
-    const opening = openingState(0xa11ce + pair * 7919);
+    const opening = openingState(
+      0xa11ce + options.seedOffset + pair * 7919,
+      options.openingPlies,
+    );
     for (const candidateSide of ["top", "bottom"]) {
       const result = playGame({
         candidate,
@@ -192,11 +236,18 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
         difficulty,
         candidateSide,
         opening,
-        seed: 0xc0ffee + pair * 104729,
+        seed: 0xc0ffee + options.seedOffset + pair * 104729,
         maxPlies: options.maxPlies,
       });
       results.push(result);
       addTelemetry(telemetry, result);
+      if (options.verbose) {
+        const outcome = result.score === 1 ? "win" : result.score === 0 ? "loss" : "draw";
+        const line = result.moves.map(({ owner, move, depth }) => (
+          `${owner === "candidate" ? "C" : "B"}:${move.mirror}R${move.row + 1}C${move.col + 1}@${depth}`
+        )).join(" ");
+        console.log(`  pair ${pair + 1} · candidate ${candidateSide} · ${outcome} · ${line}`);
+      }
     }
   }
 
@@ -227,15 +278,15 @@ const baselineSource = execFileSync(
   { cwd: projectRoot, encoding: "utf8" },
 );
 const [candidate, baseline] = await Promise.all([
-  loadAiRevision("candidate", candidateSource),
-  loadAiRevision("baseline", baselineSource),
+  loadAiRevision("candidate", candidateSource, options.ultraTime),
+  loadAiRevision("baseline", baselineSource, options.ultraTime),
 ]);
 
 console.log(
   `AI arena · candidate working tree vs ${options.baselineRef} · `
   + `${options.pairs * 2} games per difficulty`,
 );
-const assessments = difficulties.map(
+const assessments = options.difficulties.map(
   (difficulty) => assessDifficulty(candidate, baseline, difficulty, options),
 );
 const totalScore = assessments.reduce((total, result) => total + result.score, 0);

@@ -20,6 +20,11 @@ Features include:
 Ultra unlocks after defeating Hard. Progress and the current match are stored locally in the browser and
 survive game updates.
 
+Ultra uses iterative deepening with threat-aware root coverage: every move that can alter the live laser volley is
+searched alongside the strongest quiet candidates, so tactical defenses cannot disappear behind a positional
+shortlist. Quiet turns retain short think targets, while unstable score swings and developed 23-mirror positions
+unlock the remaining six-second tactical budget.
+
 ## Development
 
 The application is static HTML, CSS, and JavaScript. No package installation or compilation is required.
@@ -38,7 +43,11 @@ node scripts/elo_benchmark.mjs --pairs 12 --baseline-ref HEAD
 
 The arena reports win/draw/loss results, estimated Elo change with a 95% interval, illegal moves, and average
 search time. The Pages workflow runs a bounded arena before every deployment and rejects statistically supported
-strength regressions.
+strength regressions. Reported tactical failures should also become position fixtures in `web/fixtures/` with a
+targeted assertion in `web/ultra.test.mjs`; Elo testing and position regressions cover different failure modes.
+Use `--difficulties ultra`, `--opening-plies 4`, and `--seed-offset N` for faster focused runs and independent
+opening samples. `--ultra-time 1000` raises the arena's default compressed 300 ms Ultra budget for a more
+production-like strength check.
 
 Analyze a copied English or French match log with a wider offline Ultra search:
 

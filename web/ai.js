@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.7";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.8";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
@@ -42,12 +42,12 @@ export function routePressureScore(routeCosts, own, opponent) {
   const controlGaps = routeCosts.map(
     (costs) => boundedRouteCost(costs, own) - boundedRouteCost(costs, opponent),
   );
-  return raceGap * 42
+  return raceGap * 55
     + (
       dangerCosts.reduce((total, cost) => total + cost, 0)
       - attackCosts.reduce((total, cost) => total + cost, 0)
     ) * 12
-    + signedSquare(raceGap) * 18
+    + signedSquare(raceGap) * 28
     + controlGaps.reduce((total, gap) => total + signedSquare(gap), 0) * 8;
 }
 
@@ -171,6 +171,7 @@ export class UltraSearch {
     this.activeDepth = 0;
     this.lastProgressAt = -Infinity;
     this.ordering = new Map();
+    this.rootScores = new Map();
     this.history = new Map();
     this.killers = new Map();
     this.cache = new Map();
@@ -195,30 +196,40 @@ export class UltraSearch {
     const children = this.selectRootChildren(state);
     if (!children.length) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: 0 };
     this.childrenCache.set(rootKey, children);
-    this.strictChildren.add(rootKey);
 
-    const fallback = this.orderedChildren(state, 0)[0];
+    const fallback = this.orderedChildren(state, 0).find(
+      ({ move, state: child }) => this.strictChild(state, move, child),
+    );
+    if (!fallback) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: this.now() - started };
     let bestMove = fallback.move;
     let bestScore = -this.strategicEvaluation(fallback.state);
     let completedDepth = 1;
+    let previousIteration = null;
+    let useHardDeadline = false;
     this.nodes = children.length;
     for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
       this.activeDepth = depth;
       this.reportProgress("searching", true);
       const iterationStarted = this.now();
       const configuredDeadline = this.deadline;
-      this.deadline = Math.min(this.deadline, timing.softDeadline);
+      this.deadline = useHardDeadline
+        ? configuredDeadline
+        : Math.min(configuredDeadline, timing.softDeadline);
       try {
         const result = this.searchRoot(state, depth);
         bestMove = result.move;
         bestScore = result.score;
         completedDepth = depth;
         this.ordering.set(rootKey, moveKey(bestMove));
+        if (depth >= 2 && this.shouldExtendSearch(previousIteration, result)) {
+          useHardDeadline = true;
+        }
+        previousIteration = result;
         this.reportProgress("searching", true);
         const now = this.now();
         const iterationElapsed = now - iterationStarted;
         if (Math.abs(bestScore) >= MATE_SCORE - 100) break;
-        if (depth >= 3 && (
+        if (!useHardDeadline && depth >= 3 && (
           now >= timing.softDeadline
           || (!timing.latePosition
             && now + Math.max(50, iterationElapsed * 1.8) >= timing.softDeadline)
@@ -239,32 +250,73 @@ export class UltraSearch {
     };
   }
 
-  /** Rank approximate root moves, then retain only fully legal candidates. */
+  /** Spend the hard budget when successive depths disagree materially. */
+  shouldExtendSearch(previous, current) {
+    if (!previous) return false;
+    const scoreSwing = Math.abs(current.score - previous.score);
+    const moveChanged = moveKey(current.move) !== moveKey(previous.move);
+    return scoreSwing >= 180 || (moveChanged && scoreSwing >= 80);
+  }
+
+  /** Keep strong quiet roots plus every move that changes the live volley. */
   selectRootChildren(state) {
-    const key = this.keyForState(state);
-    const selected = [];
-    for (const item of this.orderedChildren(state, 0)) {
-      if (this.strictChild(state, item.move, item.state)) selected.push(item);
-      if (selected.length === this.profile.rootLimit) break;
+    const ordered = this.orderedChildren(state, 0);
+    const selected = ordered.slice(0, this.profile.rootLimit);
+    if (this.profile.includeForcingRoots === false || !this.shouldExpandRoot(state)) return selected;
+
+    const selectedKeys = new Set(selected.map(({ move }) => moveKey(move)));
+    const forcingKeys = new Set([...this.forcingMoves(state)].map(moveKey));
+    for (const item of ordered) {
+      const key = moveKey(item.move);
+      if (!forcingKeys.has(key) || selectedKeys.has(key)) continue;
+      selected.push(item);
+      selectedKeys.add(key);
     }
     return selected;
   }
 
-  /** Score and rank the root children at one completed depth. */
+  /** Widen the root only when live-volley tactics dominate quiet placement. */
+  shouldExpandRoot(state) {
+    const mirrors = state.board.flat().filter(
+      (cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell),
+    ).length;
+    if (mirrors >= 23) return true;
+    return this.game.fireLasers(state.board).some(
+      (beam) => beam.hitShield || beam.hitKing,
+    );
+  }
+
+  /** Score every retained root move, then exactly validate contenders. */
   searchRoot(state, depth) {
     let alpha = -Infinity;
     const beta = Infinity;
-    let children = this.orderedChildren(state, 0);
-    children = children.slice(0, this.profile.rootLimit);
+    const key = this.keyForState(state);
+    const previousScores = this.rootScores.get(key);
+    const children = this.orderedChildren(state, 0);
+    if (previousScores) {
+      children.sort((left, right) => (
+        (previousScores.get(moveKey(right.move)) ?? -Infinity)
+        - (previousScores.get(moveKey(left.move)) ?? -Infinity)
+      ));
+    }
     const ranked = [];
     for (const { move, state: child } of children) {
       this.checkInterrupted();
       const score = -this.negamax(child, depth - 1, -beta, -alpha, 1);
-      ranked.push({ move, score });
-      alpha = Math.max(alpha, score);
+      ranked.push({ move, state: child, score });
+      if (score > alpha && this.strictChild(state, move, child)) alpha = score;
     }
     ranked.sort((left, right) => right.score - left.score);
-    return ranked[0];
+    this.rootScores.set(key, new Map(
+      ranked.map(({ move, score }) => [moveKey(move), score]),
+    ));
+    for (const candidate of ranked) {
+      this.checkInterrupted();
+      if (this.strictChild(state, candidate.move, candidate.state)) {
+        return { move: candidate.move, score: candidate.score };
+      }
+    }
+    throw new Error("Ultra search found no fully legal root move.");
   }
 
   /** Evaluate a subtree with selective alpha-beta negamax. */
@@ -433,7 +485,7 @@ export class UltraSearch {
 
     const own = state.turn;
     const opponent = own === "top" ? "bottom" : "top";
-    for (const move of this.game.pseudoMoves(state)) {
+    for (const move of this.forcingMoves(state)) {
       this.checkInterrupted();
       const placed = state.board.map((row) => [...row]);
       placed[move.row][move.col] = move.mirror;
@@ -475,7 +527,7 @@ export class UltraSearch {
       return false;
     }
 
-    for (const move of this.game.pseudoMoves(state)) {
+    for (const move of this.forcingMoves(state)) {
       this.checkInterrupted();
       let child;
       try {
@@ -491,6 +543,17 @@ export class UltraSearch {
     }
     this.forcedExposureCache.set(key, true);
     return true;
+  }
+
+  /** Yield only placements capable of changing the lasers' current volley. */
+  *forcingMoves(state) {
+    const liveSquares = new Set(
+      this.game.fireLasers(state.board)
+        .flatMap((beam) => beam.path.map(([row, col]) => `${row},${col}`)),
+    );
+    for (const move of this.game.pseudoMoves(state)) {
+      if (liveSquares.has(`${move.row},${move.col}`)) yield move;
+    }
   }
 
   /** Score shield shape, live beam pressure, and route resilience. */
@@ -575,7 +638,7 @@ export class UltraSearch {
   /** Set a phase-aware think target below the absolute search deadline. */
   softTiming(state, started) {
     const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
-    const latePosition = mirrors >= 31;
+    const latePosition = mirrors >= 23;
     const own = state.turn;
     const opponent = own === "top" ? "bottom" : "top";
     const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
