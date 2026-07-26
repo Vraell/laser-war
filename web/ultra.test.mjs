@@ -221,6 +221,45 @@ assert.ok(performance.now() - freezeStarted < 3500, "Ultra exceeded the freeze r
 assert.ok(freezeResult.depth >= 2, "Ultra should search beyond its fallback in the reported position.");
 assert.ok(freezeGame.isLegalMove(freezeState, freezeResult.move));
 
+const reportedFifteenMoveFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_15_move_log.json", import.meta.url),
+));
+const fifteenMoveGame = new Game();
+let fifteenMoveState = fifteenMoveGame.initialState();
+for (const [row, col, mirror] of reportedFifteenMoveFixture.moves.slice(0, 11)) {
+  fifteenMoveState = fifteenMoveGame.resolveMove(fifteenMoveState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const fifteenMoveSearch = new UltraSearch(fifteenMoveGame, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 3,
+  rootLimit: 16,
+  branchLimits: [22, 14, 10],
+});
+assert.deepEqual(
+  fifteenMoveSearch.choose(fifteenMoveState).move,
+  { row: 4, col: 6, mirror: "/" },
+);
+
+const loggedBlunderState = fifteenMoveGame.resolveMove(
+  fifteenMoveState,
+  { row: 4, col: 2, mirror: "/" },
+).state;
+const fifteenMoveProof = new TacticalProofSearch(fifteenMoveGame).prove(
+  loggedBlunderState,
+  "bottom",
+  3,
+);
+assert.equal(fifteenMoveProof.status, "proven");
+assert.deepEqual(fifteenMoveProof.line, [
+  { row: 2, col: 5, mirror: "\\" },
+  { row: 2, col: 2, mirror: "/" },
+  { row: 2, col: 4, mirror: "/" },
+]);
+
 const rootPruningFixture = JSON.parse(readFileSync(
   new URL("./fixtures/ultra_root_pruning_31_move_log.json", import.meta.url),
 ));
@@ -277,12 +316,13 @@ filteredSearch.strictSubset = () => [];
 assert.equal(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infinity, 1), 0);
 
 const productionSearch = new UltraSearch(game, () => 0);
-assert.ok(productionSearch.profile.maxDepth >= 8);
+assert.ok(productionSearch.profile.maxDepth >= 12);
+assert.equal(productionSearch.profile.timeLimit, 8000);
 assert.equal(productionSearch.profile.rootLimit, 16);
 assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
-  softDeadline: 2250,
+  softDeadline: 2750,
 });
 const lateTimingState = game.initialState();
 for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {

@@ -1,8 +1,8 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.11";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.12";
 
 const ULTRA_PROFILE = {
-  timeLimit: 6000,
-  maxDepth: 10,
+  timeLimit: 8000,
+  maxDepth: 12,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
 };
@@ -644,7 +644,7 @@ export class UltraSearch {
     const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
     const threatenedShields = this.game.fireLasers(state.board).some((beam) => beam.hitShield);
     const tacticalEmergency = routePressure <= -180 || threatenedShields;
-    const softLimit = latePosition ? 6000 : tacticalEmergency ? 4750 : mirrors >= 12 ? 3500 : 2250;
+    const softLimit = latePosition ? 8000 : tacticalEmergency ? 6250 : mirrors >= 12 ? 4500 : 2750;
     return {
       latePosition,
       softDeadline: Math.min(this.deadline, started + softLimit),

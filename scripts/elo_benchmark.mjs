@@ -65,8 +65,8 @@ function randomSource(initialSeed) {
 async function loadAiRevision(label, source, ultraTime) {
   const directory = mkdtempSync(join(tmpdir(), `laser-war-${label}-`));
   const engineUrl = pathToFileURL(join(projectRoot, "web", "engine.js")).href;
-  const timingScale = ultraTime / 6000;
-  const scaledTiming = [6000, 4750, 3500, 2250].map(
+  const timingScale = ultraTime / 8000;
+  const scaledTiming = [8000, 6250, 4500, 2750].map(
     (milliseconds) => Math.max(50, Math.round(milliseconds * timingScale)),
   );
   const reserve = Math.max(5, Math.round(150 * timingScale));
@@ -75,10 +75,10 @@ async function loadAiRevision(label, source, ultraTime) {
       /from\s+["']\.\/engine\.js(?:\?v=[^"']+)?["']/,
       `from ${JSON.stringify(engineUrl)}`,
     )
-    .replace(/timeLimit:\s*6000/, `timeLimit: ${ultraTime}`)
+    .replace(/timeLimit:\s*\d+/, `timeLimit: ${ultraTime}`)
     .replace("this.profile.timeLimit - 150", `this.profile.timeLimit - ${reserve}`)
     .replace(
-      /const softLimit = latePosition \? 6000 : tacticalEmergency \? 4750 : mirrors >= 12 \? 3500 : 2250;/,
+      /const softLimit = latePosition \? \d+ : tacticalEmergency \? \d+ : mirrors >= 12 \? \d+ : \d+;/,
       `const softLimit = latePosition ? ${scaledTiming[0]} : tacticalEmergency ? ${scaledTiming[1]} : mirrors >= 12 ? ${scaledTiming[2]} : ${scaledTiming[3]};`,
     )
     .replaceAll("performance.now()", "globalThis.__laserWarArenaNow()");
