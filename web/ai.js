@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.12";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.13";
 
 const ULTRA_PROFILE = {
   timeLimit: 8000,
@@ -221,7 +221,11 @@ export class UltraSearch {
         bestScore = result.score;
         completedDepth = depth;
         this.ordering.set(rootKey, moveKey(bestMove));
-        if (depth >= 2 && this.shouldExtendSearch(previousIteration, result)) {
+        if (depth >= 2 && this.shouldExtendSearch(
+          previousIteration,
+          result,
+          this.isTacticalPosition(state),
+        )) {
           useHardDeadline = true;
         }
         previousIteration = result;
@@ -250,9 +254,9 @@ export class UltraSearch {
     };
   }
 
-  /** Spend the hard budget when successive depths disagree materially. */
-  shouldExtendSearch(previous, current) {
-    if (!previous) return false;
+  /** Spend the hard budget only for unstable positions with a concrete tactical signal. */
+  shouldExtendSearch(previous, current, tacticalPosition = false) {
+    if (!previous || !tacticalPosition) return false;
     const scoreSwing = Math.abs(current.score - previous.score);
     const moveChanged = moveKey(current.move) !== moveKey(previous.move);
     return scoreSwing >= 180 || (moveChanged && scoreSwing >= 80);
@@ -639,16 +643,21 @@ export class UltraSearch {
   softTiming(state, started) {
     const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
     const latePosition = mirrors >= 23;
-    const own = state.turn;
-    const opponent = own === "top" ? "bottom" : "top";
-    const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
-    const threatenedShields = this.game.fireLasers(state.board).some((beam) => beam.hitShield);
-    const tacticalEmergency = routePressure <= -180 || threatenedShields;
+    const tacticalEmergency = this.isTacticalPosition(state);
     const softLimit = latePosition ? 8000 : tacticalEmergency ? 6250 : mirrors >= 12 ? 4500 : 2750;
     return {
       latePosition,
       softDeadline: Math.min(this.deadline, started + softLimit),
     };
+  }
+
+  /** Identify live laser pressure that justifies using Ultra's full think budget. */
+  isTacticalPosition(state) {
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
+    const beams = this.game.fireLasers(state.board);
+    return routePressure <= -180 || beams.some((beam) => beam.hitShield || beam.hitKing);
   }
 }
 

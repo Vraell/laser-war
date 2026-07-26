@@ -296,13 +296,22 @@ assert.equal(
   threatAwareRootSearch.shouldExtendSearch(
     { move: { row: 2, col: 2, mirror: "/" }, score: 272 },
     { move: { row: 5, col: 1, mirror: "\\" }, score: -27 },
+    true,
   ),
   true,
 );
 assert.equal(
   threatAwareRootSearch.shouldExtendSearch(
+    { move: { row: 2, col: 2, mirror: "/" }, score: 272 },
+    { move: { row: 5, col: 1, mirror: "\\" }, score: -27 },
+  ),
+  false,
+);
+assert.equal(
+  threatAwareRootSearch.shouldExtendSearch(
     { move: { row: 5, col: 1, mirror: "\\" }, score: -20 },
     { move: { row: 5, col: 1, mirror: "\\" }, score: -35 },
+    true,
   ),
   false,
 );
@@ -324,6 +333,13 @@ assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
   softDeadline: 2750,
 });
+const commonOpeningState = game.resolveMove(game.initialState(), {
+  row: 4,
+  col: 1,
+  mirror: "/",
+}).state;
+assert.equal(productionSearch.isTacticalPosition(commonOpeningState), false);
+assert.equal(productionSearch.softTiming(commonOpeningState, 0).softDeadline, 2750);
 const lateTimingState = game.initialState();
 for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
   lateTimingState.board[row - 1][col - 1] = mirror;
