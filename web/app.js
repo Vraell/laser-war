@@ -1,22 +1,22 @@
-import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.11.14";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.11.15";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.14";
+} from "./save.js?v=0.11.15";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.14";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.14";
-import { beamPoints } from "./beam.js?v=0.11.14";
-import { drawDetailKey } from "./result.js?v=0.11.14";
+} from "./progress.js?v=0.11.15";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.15";
+import { beamPoints } from "./beam.js?v=0.11.15";
+import { drawDetailKey } from "./result.js?v=0.11.15";
 
 const SAVE_KEY = "laser-war.web.v1";
-const GAME_VERSION = "v0.11.14";
+const GAME_VERSION = "v0.11.15";
 const BEAM_VISIBLE_MS = 920;
 const game = new Game();
 
@@ -222,7 +222,7 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.11.14", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.11.15", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {

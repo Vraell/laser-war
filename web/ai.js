@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.14";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.15";
 
 const ULTRA_PROFILE = {
   timeLimit: 8000,
@@ -179,6 +179,7 @@ export class UltraSearch {
     this.strictChildren = new Set();
     this.legalityCache = new Map();
     this.evaluationCache = new Map();
+    this.orderingEvaluationCache = new Map();
     this.forcingCache = new Map();
     this.forcedExposureCache = new Map();
     this.stateKeys = new WeakMap();
@@ -450,7 +451,9 @@ export class UltraSearch {
   movePriority(state, move, child, preferred, killers) {
     if (child.winner === state.turn) return 1_000_000;
     if (child.winner) return -1_000_000;
-    const terminal = child.draw ? 0 : -this.strategicEvaluation(child) * 1000;
+    // Ordering runs at every internal node. Keep it cheap; the full route
+    // evaluation belongs at leaves and would otherwise dominate the search.
+    const terminal = child.draw ? 0 : -this.orderingEvaluation(state, child) * 1000;
     let adjacentMirrors = 0;
     for (let row = Math.max(0, move.row - 1); row < Math.min(BOARD_SIZE, move.row + 2); row += 1) {
       for (let col = Math.max(0, move.col - 1); col < Math.min(BOARD_SIZE, move.col + 2); col += 1) {
@@ -464,6 +467,16 @@ export class UltraSearch {
       + terminal
       + (this.history.get(key) || 0)
       + adjacentMirrors * 20;
+  }
+
+  /** Score a child cheaply for move ordering without running route searches. */
+  orderingEvaluation(state, child) {
+    const key = this.keyForState(child);
+    if (this.orderingEvaluationCache.has(key)) return this.orderingEvaluationCache.get(key);
+    let score = this.game.evaluate(child);
+    score += this.shieldExchange(state, child) * 24;
+    this.orderingEvaluationCache.set(key, score);
+    return score;
   }
 
   /** Extend exposed-king horizons through all legal tactical evasions. */
