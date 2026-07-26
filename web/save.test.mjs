@@ -5,12 +5,12 @@ import { buildActiveSave } from "./save.js";
 const saved = buildActiveSave({
   id: "match-1",
   startedAt: "2026-07-26T12:00:00.000Z",
-  gameVersion: "v0.11.10",
+  gameVersion: "v0.11.11",
   mode: "local",
   difficulty: "medium",
   history: [],
 });
 
-assert.equal(saved.gameVersion, "v0.11.10");
+assert.equal(saved.gameVersion, "v0.11.11");
 
 console.log("Web save metadata checks passed.");
