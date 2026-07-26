@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { routePressureScore, UltraSearch } from "./ai.js";
 import { Game } from "./engine.js";
+import { TacticalProofSearch } from "./tactics.js";
 
 const TEST_PROFILE = {
   timeLimit: Infinity,
@@ -278,6 +279,7 @@ assert.equal(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infi
 const productionSearch = new UltraSearch(game, () => 0);
 assert.ok(productionSearch.profile.maxDepth >= 8);
 assert.equal(productionSearch.profile.rootLimit, 16);
+assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
   softDeadline: 2250,
@@ -287,6 +289,45 @@ for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
   lateTimingState.board[row - 1][col - 1] = mirror;
 }
 assert.equal(productionSearch.softTiming(lateTimingState, 0).latePosition, true);
+
+const chokeFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_choke_46_move_log.json", import.meta.url),
+));
+const chokeGame = new Game();
+let chokeState = chokeGame.initialState();
+for (const [row, col, mirror] of chokeFixture.moves.slice(0, 40)) {
+  chokeState = chokeGame.resolveMove(chokeState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const tacticalProof = new TacticalProofSearch(chokeGame);
+const forcedHumanWin = tacticalProof.prove(chokeState, "bottom", 5);
+assert.equal(forcedHumanWin.status, "proven");
+assert.equal(forcedHumanWin.distance, 5);
+assert.deepEqual(forcedHumanWin.line[0], { row: 2, col: 0, mirror: "/" });
+
+for (const [row, col, mirror] of chokeFixture.moves.slice(40, 44)) {
+  chokeState = chokeGame.resolveMove(chokeState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const mateInOne = tacticalProof.prove(chokeState, "bottom", 1);
+assert.equal(mateInOne.status, "proven");
+assert.deepEqual(mateInOne.line[0], { row: 5, col: 2, mirror: "\\" });
+
+const [blunderRow, blunderCol, blunderMirror] = chokeFixture.moves[44];
+chokeState = chokeGame.resolveMove(chokeState, {
+  row: blunderRow - 1,
+  col: blunderCol - 1,
+  mirror: blunderMirror,
+}).state;
+const ultraMate = tacticalProof.prove(chokeState, "top", 1);
+assert.equal(ultraMate.status, "proven");
+assert.deepEqual(ultraMate.line[0], { row: 7, col: 8, mirror: "/" });
 
 console.log(
   `Ultra horizon check passed at depth ${result.depth} `

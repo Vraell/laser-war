@@ -108,7 +108,7 @@ function rotateMove(move) {
 }
 
 /** Ask one revision to move with deterministic clocks and randomness. */
-function chooseMove(revision, difficulty, game, state, random) {
+function chooseMove(revision, player, difficulty, game, state, random) {
   const normalized = state.turn === "top" ? state : stateFromTopPerspective(state);
   let clock = 0;
   globalThis.__laserWarArenaNow = difficulty === "ultra"
@@ -118,7 +118,9 @@ function chooseMove(revision, difficulty, game, state, random) {
       return clock;
     };
   const started = process.hrtime.bigint();
-  const result = revision.chooseComputerMove(game, normalized, difficulty, { random });
+  const result = player
+    ? player(normalized, difficulty, { random, now: globalThis.__laserWarArenaNow })
+    : revision.chooseComputerMove(game, normalized, difficulty, { random });
   const elapsed = Number(process.hrtime.bigint() - started) / 1e6;
   return {
     ...result,
@@ -157,12 +159,15 @@ function playGame({
     candidate: { nodes: 0, wallMilliseconds: 0, moves: 0 },
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
   };
+  const candidatePlayer = candidate.createComputerPlayer?.(game) || null;
+  const baselinePlayer = baseline.createComputerPlayer?.(game) || null;
   const moves = [];
 
   for (let ply = 0; ply < maxPlies && !state.winner && !state.draw; ply += 1) {
     const owner = state.turn === candidateSide ? "candidate" : "baseline";
     const revision = owner === "candidate" ? candidate : baseline;
-    const result = chooseMove(revision, difficulty, game, state, random);
+    const player = owner === "candidate" ? candidatePlayer : baselinePlayer;
+    const result = chooseMove(revision, player, difficulty, game, state, random);
     telemetry[owner].nodes += result.nodes || 0;
     telemetry[owner].wallMilliseconds += result.wallMilliseconds;
     telemetry[owner].moves += 1;

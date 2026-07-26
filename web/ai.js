@@ -1,10 +1,10 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.8";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.9";
 
 const ULTRA_PROFILE = {
   timeLimit: 6000,
   maxDepth: 10,
   rootLimit: 16,
-  branchLimits: [14, 10, 7],
+  branchLimits: [22, 14, 10],
 };
 const MATE_SCORE = 10_000;
 
@@ -659,4 +659,20 @@ export function chooseComputerMove(game, state, difficulty = "medium", options =
   return difficulty === "ultra"
     ? new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress).choose(state)
     : standardMove(game, state, difficulty, random);
+}
+
+/** Create a match-scoped player that preserves Ultra's search knowledge. */
+export function createComputerPlayer(game) {
+  let ultraSearch = null;
+  return (state, difficulty = "medium", options = {}) => {
+    if (difficulty !== "ultra") return chooseComputerMove(game, state, difficulty, options);
+    const now = options.now || (() => performance.now());
+    if (!ultraSearch) {
+      ultraSearch = new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress);
+    } else {
+      ultraSearch.now = now;
+      ultraSearch.onProgress = options.onProgress || (() => {});
+    }
+    return ultraSearch.choose(state);
+  };
 }

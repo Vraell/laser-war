@@ -1,19 +1,19 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.8";
+import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.9";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.8";
+} from "./save.js?v=0.11.9";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.8";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.8";
-import { beamPoints } from "./beam.js?v=0.11.8";
-import { drawDetailKey } from "./result.js?v=0.11.8";
+} from "./progress.js?v=0.11.9";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.9";
+import { beamPoints } from "./beam.js?v=0.11.9";
+import { drawDetailKey } from "./result.js?v=0.11.9";
 
 const SAVE_KEY = "laser-war.web.v1";
 const BEAM_VISIBLE_MS = 920;
@@ -60,6 +60,8 @@ let aiWorker = null;
 let aiRequestId = 0;
 let aiTimer = 0;
 let aiProgress = null;
+let aiStartedAt = 0;
+let aiDifficulty = "medium";
 let ultraUnlockedThisMatch = false;
 
 function t(key, values = {}) {
@@ -192,7 +194,7 @@ function playMove(move, actor) {
 /** Lock input and submit the current position to the AI worker. */
 function beginComputerTurn() {
   if (elements.gameScreen.hidden || !computerTurn() || inputLocked) return;
-  cancelComputerTurn();
+  cancelComputerTurn(true, false);
   inputLocked = true;
   elements.status.textContent = t("computerThinking");
   elements.statusLight.style.background = "var(--cyan)";
@@ -200,6 +202,8 @@ function beginComputerTurn() {
   elements.aiDetail.classList.add("thinking");
   const started = performance.now();
   const difficulty = session.difficulty;
+  aiStartedAt = started;
+  aiDifficulty = difficulty;
   aiProgress = difficulty === "ultra" ? { phase: "preparing", depth: 0, nodes: 0 } : null;
   renderAiProgress(difficulty, started);
   renderBoard();
@@ -208,23 +212,24 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  aiWorker = new Worker("./ai_worker.js?v=0.11.8", { type: "module" });
-  aiWorker.addEventListener("message", ({ data }) => {
-    if (data.requestId !== requestId || requestId !== aiRequestId) return;
-    if (data.type === "progress") {
-      aiProgress = data.progress;
-      renderAiProgress(difficulty, started);
-      return;
-    }
-    finishComputerTurn(data.result);
-  });
-  aiWorker.addEventListener("error", () => {
-    if (requestId !== aiRequestId) return;
-    cancelComputerTurn();
-    inputLocked = false;
-    render();
-    showToast(t("computerSearchFailed"));
-  });
+  if (!aiWorker) {
+    aiWorker = new Worker("./ai_worker.js?v=0.11.9", { type: "module" });
+    aiWorker.addEventListener("message", ({ data }) => {
+      if (data.requestId !== aiRequestId) return;
+      if (data.type === "progress") {
+        aiProgress = data.progress;
+        renderAiProgress(aiDifficulty, aiStartedAt);
+        return;
+      }
+      finishComputerTurn(data.result);
+    });
+    aiWorker.addEventListener("error", () => {
+      cancelComputerTurn();
+      inputLocked = false;
+      render();
+      showToast(t("computerSearchFailed"));
+    });
+  }
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
 }
 
@@ -249,7 +254,7 @@ function renderAiProgress(difficulty, started) {
 
 /** Apply a still-current AI result or restart search when it became stale. */
 function finishComputerTurn(result) {
-  cancelComputerTurn(false);
+  cancelComputerTurn(false, false);
   inputLocked = false;
   if (!computerTurn()) return;
   if (!result.move) {
@@ -269,12 +274,14 @@ function finishComputerTurn(result) {
 }
 
 /** Cancel timers and invalidate pending worker responses. */
-function cancelComputerTurn(invalidate = true) {
+function cancelComputerTurn(invalidate = true, terminateWorker = true) {
   if (invalidate) aiRequestId += 1;
   window.clearInterval(aiTimer);
   aiTimer = 0;
-  aiWorker?.terminate();
-  aiWorker = null;
+  if (terminateWorker) {
+    aiWorker?.terminate();
+    aiWorker = null;
+  }
   aiProgress = null;
   elements.aiDetail?.classList.remove("thinking");
 }

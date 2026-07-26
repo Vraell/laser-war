@@ -1,10 +1,11 @@
-import { chooseComputerMove } from "./ai.js?v=0.11.8";
-import { Game } from "./engine.js?v=0.11.8";
+import { createComputerPlayer } from "./ai.js?v=0.11.9";
+import { Game } from "./engine.js?v=0.11.9";
 
 const game = new Game();
+const chooseMove = createComputerPlayer(game);
 
 self.addEventListener("message", ({ data }) => {
-  const result = chooseComputerMove(game, data.state, data.difficulty, {
+  const result = chooseMove(data.state, data.difficulty, {
     onProgress(progress) {
       self.postMessage({ type: "progress", requestId: data.requestId, progress });
     },

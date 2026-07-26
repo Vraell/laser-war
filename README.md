@@ -20,10 +20,12 @@ Features include:
 Ultra unlocks after defeating Hard. Progress and the current match are stored locally in the browser and
 survive game updates.
 
-Ultra uses iterative deepening with threat-aware root coverage: every move that can alter the live laser volley is
-searched alongside the strongest quiet candidates, so tactical defenses cannot disappear behind a positional
-shortlist. Quiet turns retain short think targets, while unstable score swings and developed 23-mirror positions
-unlock the remaining six-second tactical budget.
+Ultra uses iterative deepening with threat-aware root coverage and wider reply sampling in developed positions.
+Its Web Worker and search tables persist for the match, allowing later turns to reuse explored continuations
+instead of restarting from an empty tree. Every move that can alter the live laser volley is searched alongside
+the strongest quiet candidates, so tactical defenses cannot disappear behind a positional shortlist. Quiet turns
+retain short think targets, while unstable score swings and developed 23-mirror positions unlock the remaining
+six-second tactical budget.
 
 ## Development
 
@@ -56,8 +58,11 @@ node scripts/analyze_match.mjs path/to/match-log.txt --jobs 4
 ```
 
 The analyzer validates and replays the match, compares every played move with its preferred continuation, then
-deepens the largest candidate mistakes. It writes an interactive evaluation chart, board explorer, and
-machine-readable JSON to `artifacts/`. Use `--depth`, `--refine`, and `--refine-depth` to adjust the analysis.
+deepens the largest candidate mistakes. Near the finish it also performs tactical proof search: attacking moves
+are restricted to placements that alter a live laser, while every legal defense is covered. Proven wins override
+heuristic evaluations in the report. It writes an interactive evaluation chart, board explorer, and
+machine-readable JSON to `artifacts/`. Use `--depth`, `--refine`, `--refine-depth`, `--tactical-plies`, and
+`--tactical-window` to adjust the analysis.
 
 Build and validate the GitHub Pages artifact:
 

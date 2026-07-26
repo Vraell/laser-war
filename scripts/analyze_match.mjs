@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { UltraSearch } from "../web/ai.js";
 import { Cell, Game } from "../web/engine.js";
+import { TacticalProofSearch } from "../web/tactics.js";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const DEFAULT_PROFILE = {
@@ -69,6 +70,8 @@ function parseArguments(argv) {
     refine: 6,
     refineDepth: 3,
     jobs: 2,
+    tacticalPlies: 5,
+    tacticalWindow: 6,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -78,6 +81,8 @@ function parseArguments(argv) {
     else if (argument === "--refine") options.refine = Number(argv[++index]);
     else if (argument === "--refine-depth") options.refineDepth = Number(argv[++index]);
     else if (argument === "--jobs") options.jobs = Number(argv[++index]);
+    else if (argument === "--tactical-plies") options.tacticalPlies = Number(argv[++index]);
+    else if (argument === "--tactical-window") options.tacticalWindow = Number(argv[++index]);
     else if (argument === "--help") options.help = true;
     else throw new Error(`Unknown argument: ${argument}`);
   }
@@ -95,7 +100,42 @@ function parseArguments(argv) {
   if (!Number.isInteger(options.jobs) || options.jobs < 1 || options.jobs > 4) {
     throw new Error("--jobs must be an integer from 1 to 4.");
   }
+  if (!Number.isInteger(options.tacticalPlies) || options.tacticalPlies < 1 || options.tacticalPlies > 9) {
+    throw new Error("--tactical-plies must be an integer from 1 to 9.");
+  }
+  if (!Number.isInteger(options.tacticalWindow) || options.tacticalWindow < 0) {
+    throw new Error("--tactical-window must be a non-negative integer.");
+  }
   return options;
+}
+
+/** Prove short terminal sequences near the finish without heuristic pruning. */
+function analyzeTactics(replay, options) {
+  const proofs = Array(replay.snapshots.length).fill(null);
+  const first = Math.max(0, replay.snapshots.length - 1 - options.tacticalWindow);
+  const game = new Game();
+  const search = new TacticalProofSearch(game);
+  for (let index = first; index < replay.snapshots.length; index += 1) {
+    const snapshot = replay.snapshots[index];
+    if (snapshot.winner || snapshot.draw) continue;
+    const state = {
+      board: snapshot.board.map((row) => row.split("")),
+      turn: snapshot.turn,
+      winner: snapshot.winner,
+      draw: snapshot.draw,
+    };
+    const preferred = index && proofs[index - 1]?.winner
+      ? proofs[index - 1].winner
+      : state.turn;
+    const targets = [preferred, preferred === "bottom" ? "top" : "bottom"];
+    for (const winner of targets) {
+      const result = search.prove(state, winner, options.tacticalPlies);
+      if (result.status !== "proven") continue;
+      proofs[index] = result;
+      break;
+    }
+  }
+  return proofs;
 }
 
 /** Parse a copied English or French match log. */
@@ -270,17 +310,42 @@ function qualityLabel(loss) {
   return "Sound";
 }
 
+/** Prefer exact forced-win transitions over heuristic move labels. */
+function tacticalQuality(move, before, after, heuristic) {
+  const mover = move.actor === "You" ? "bottom" : "top";
+  const opponent = mover === "bottom" ? "top" : "bottom";
+  if (before?.winner === mover && after?.winner === opponent) return "Throws forced win";
+  if (after?.winner === mover) {
+    return before?.winner === mover ? "Keeps forced win" : "Finds forced win";
+  }
+  if (after?.winner === opponent) {
+    return before?.winner === opponent ? "Forced loss" : "Allows forced win";
+  }
+  return heuristic;
+}
+
 /** Produce one self-contained interactive HTML analysis report. */
 function buildReport(payload) {
   const terminal = payload.finalState.winner
     ? `${payload.finalState.winner === "bottom" ? "You" : "Ultra"} won`
     : payload.finalState.draw ? "Draw" : "Unfinished";
-  const enriched = payload.moves.map((move, index) => ({
-    ...move,
-    ...payload.analysis[index],
-    positionEvaluation: payload.positionEvaluations[index + 1],
-    quality: qualityLabel(payload.analysis[index].loss),
-  }));
+  const enriched = payload.moves.map((move, index) => {
+    const tacticalBefore = payload.tacticalProofs[index];
+    const tacticalAfter = payload.tacticalProofs[index + 1];
+    return {
+      ...move,
+      ...payload.analysis[index],
+      positionEvaluation: payload.positionEvaluations[index + 1],
+      quality: tacticalQuality(
+        move,
+        tacticalBefore,
+        tacticalAfter,
+        qualityLabel(payload.analysis[index].loss),
+      ),
+      tacticalBefore,
+      tacticalAfter,
+    };
+  });
   const worstHuman = [...enriched]
     .filter((move) => move.actor === "You")
     .sort((left, right) => right.loss - left.loss)[0];
@@ -354,6 +419,8 @@ function buildReport(payload) {
     .move-row:hover,.move-row.active { background:#222c31; }
     .move-row .score { text-align:right; font-variant-numeric:tabular-nums; }
     .quality { color:var(--muted); font-size:11px; display:block; }
+    .proof { margin-top:14px; border-left:3px solid var(--cyan); padding:10px 12px; background:#11171a; }
+    .proof strong { display:block; }
     @media (max-width:900px) { main { grid-template-columns:1fr; } .analysis { border-right:0; }
       .summary { grid-template-columns:1fr 1fr; } .sidebar { border-top:1px solid var(--line); } }
   </style>
@@ -392,6 +459,8 @@ function buildReport(payload) {
           <div><small>Analysis</small><strong id="telemetry"></strong></div>
           <div><small>Shields remaining</small><strong id="shields"></strong></div>
         </div>
+        <div class="proof"><small class="muted">Exact tactical proof</small><strong id="proof"></strong>
+          <span class="muted" id="proof-line"></span></div>
       </div>
     </aside>
   </main>
@@ -403,6 +472,9 @@ function buildReport(payload) {
     const normalize = value => Math.abs(value) >= 9000 ? Math.sign(value) : Math.tanh(value / 650);
     const scoreText = value => Math.abs(value) >= 9000 ? (value > 0 ? "Mate · You" : "Mate · Ultra")
       : (value > 0 ? "+" : "") + Math.round(value);
+    const moveText = move => move ? move.mirror + " R" + (move.row + 1) + "C" + (move.col + 1) : "";
+    const proofText = proof => !proof ? "No short forced win proven"
+      : (proof.winner === "bottom" ? "You force" : "Ultra forces") + " a win in " + proof.distance + " plies";
     function drawChart() {
       const ratio = devicePixelRatio || 1; const box = chart.getBoundingClientRect();
       chart.width = Math.round(box.width * ratio); chart.height = Math.round(box.height * ratio);
@@ -458,6 +530,12 @@ function buildReport(payload) {
       document.querySelector("#quality").textContent = move ? move.quality + " (" + Math.round(move.loss) + ")" : "—";
       document.querySelector("#telemetry").textContent = move ? "depth " + move.depth + " · " + move.nodes.toLocaleString() : "—";
       document.querySelector("#shields").textContent = snapshot.shields.total;
+      const proof = data.tacticalProofs[selected];
+      document.querySelector("#proof").textContent = proofText(proof);
+      document.querySelector("#proof-line").textContent = proof
+        ? "Longest defense line: " + proof.line.map(moveText).join(" · ")
+          + " · every legal defense covered"
+        : "";
       document.querySelector("#previous").disabled = selected === 0;
       document.querySelector("#next").disabled = selected === data.moves.length;
       renderList(); drawChart();
@@ -494,7 +572,8 @@ async function main() {
   if (options.help) {
     console.log(
       "Usage: node scripts/analyze_match.mjs MATCH_LOG [--depth 2] [--refine 6] "
-      + "[--refine-depth 3] [--jobs 2] [--output REPORT.html]",
+      + "[--refine-depth 3] [--jobs 2] [--tactical-plies 5] "
+      + "[--tactical-window 6] [--output REPORT.html]",
     );
     return;
   }
@@ -516,6 +595,7 @@ async function main() {
     );
     for (const result of refined) analysis[result.index] = result;
   }
+  const tacticalProofs = analyzeTactics(replay, options);
   const positionEvaluations = analysis.map((item, index) => (
     item.bestScoreForMover * (replay.tasks[index].state.turn === "bottom" ? 1 : -1)
   ));
@@ -528,6 +608,12 @@ async function main() {
       return score * (replay.finalState.turn === "bottom" ? 1 : -1);
     })();
   positionEvaluations.push(finalEvaluation);
+  for (let index = 0; index < tacticalProofs.length; index += 1) {
+    const proof = tacticalProofs[index];
+    if (!proof) continue;
+    positionEvaluations[index] = (proof.winner === "bottom" ? 1 : -1)
+      * (10000 - proof.distance);
+  }
   const outputPath = resolve(
     options.output
       || joinArtifactName(inputPath),
@@ -541,6 +627,7 @@ async function main() {
     finalState: replay.finalState,
     analysis,
     positionEvaluations,
+    tacticalProofs,
   };
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, buildReport(payload));
