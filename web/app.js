@@ -1,22 +1,22 @@
-import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.11.13";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.11.14";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.13";
+} from "./save.js?v=0.11.14";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.13";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.13";
-import { beamPoints } from "./beam.js?v=0.11.13";
-import { drawDetailKey } from "./result.js?v=0.11.13";
+} from "./progress.js?v=0.11.14";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.14";
+import { beamPoints } from "./beam.js?v=0.11.14";
+import { drawDetailKey } from "./result.js?v=0.11.14";
 
 const SAVE_KEY = "laser-war.web.v1";
-const GAME_VERSION = "v0.11.13";
+const GAME_VERSION = "v0.11.14";
 const BEAM_VISIBLE_MS = 920;
 const game = new Game();
 
@@ -64,6 +64,7 @@ let aiProgress = null;
 let aiStartedAt = 0;
 let aiDifficulty = "medium";
 let ultraUnlockedThisMatch = false;
+let pendingShieldImpacts = new Set();
 
 function t(key, values = {}) {
   return translate(language, key, values);
@@ -145,6 +146,7 @@ function startGame(mode, difficulty = currentDifficulty(), persist = true) {
   session = createSession(mode, difficulty);
   lastOutcome = null;
   ultraUnlockedThisMatch = false;
+  pendingShieldImpacts = new Set();
   startGameView();
   if (persist) saveGame();
 }
@@ -173,6 +175,9 @@ function playMove(move, actor) {
   session.history.push(record);
   session.redo = [];
   lastOutcome = outcome;
+  pendingShieldImpacts = new Set(
+    outcome.destroyed.map(([row, col]) => `${row},${col}`),
+  );
   inputLocked = true;
   refreshLegalMoves();
   render();
@@ -183,6 +188,7 @@ function playMove(move, actor) {
 
   window.setTimeout(() => {
     if (session.id !== matchId || elements.gameScreen.hidden) return;
+    pendingShieldImpacts = new Set();
     inputLocked = false;
     render();
     if (session.state.winner || session.state.draw) {
@@ -216,7 +222,7 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.11.13", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.11.14", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {
@@ -329,7 +335,9 @@ function renderBoard() {
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
       const cell = document.createElement("button");
-      const value = session.state.board[row][col];
+      const value = pendingShieldImpacts.has(`${row},${col}`)
+        ? Cell.SHIELD
+        : session.state.board[row][col];
       const move = { row, col, mirror: selectedMirror };
       const moveIsLegal = legal.has(moveKey(move));
       const canAct = humanTurn()

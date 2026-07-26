@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.13";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.14";
 
 const ULTRA_PROFILE = {
   timeLimit: 8000,
@@ -145,7 +145,7 @@ function standardMove(game, state, difficulty, random) {
         ));
       if (opponentWins) candidate.score = -10000;
     }
-    ranked.sort((left, right) => right.score - left.score);
+  ranked.sort((left, right) => right.score - left.score);
   }
 
   const poolSize = Math.min(3, ranked.length);
@@ -310,11 +310,20 @@ export class UltraSearch {
       ranked.push({ move, state: child, score });
       if (score > alpha && this.strictChild(state, move, child)) alpha = score;
     }
-    ranked.sort((left, right) => right.score - left.score);
+    ranked.sort((left, right) => (
+      right.score - left.score
+      || this.shieldExchange(state, right.state) - this.shieldExchange(state, left.state)
+    ));
     this.rootScores.set(key, new Map(
       ranked.map(({ move, score }) => [moveKey(move), score]),
     ));
-    for (const candidate of ranked) {
+    const nonSacrificing = ranked.filter(
+      (candidate) => this.shieldExchange(state, candidate.state) >= 0,
+    );
+    const candidates = this.isTacticalPosition(state) || !nonSacrificing.length
+      ? ranked
+      : nonSacrificing;
+    for (const candidate of candidates) {
       this.checkInterrupted();
       if (this.strictChild(state, candidate.move, candidate.state)) {
         return { move: candidate.move, score: candidate.score };
@@ -585,6 +594,17 @@ export class UltraSearch {
     if (hitKings.has(own)) score -= 240;
     this.evaluationCache.set(key, score);
     return score;
+  }
+
+  /** Prefer equal-scoring moves that damage opposing king cover over friendly cover. */
+  shieldExchange(state, child) {
+    const ownKing = state.turn === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING;
+    const opponentKing = state.turn === "top" ? Cell.BOTTOM_KING : Cell.TOP_KING;
+    const ownLost = this.game.nearbyShields(state.board, ownKing)
+      - this.game.nearbyShields(child.board, ownKing);
+    const opponentLost = this.game.nearbyShields(state.board, opponentKing)
+      - this.game.nearbyShields(child.board, opponentKing);
+    return opponentLost - ownLost;
   }
 
   /** Weight close shields more heavily than loose outer protection. */

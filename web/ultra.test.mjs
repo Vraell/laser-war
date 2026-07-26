@@ -288,9 +288,13 @@ const threatAwareRootSearch = new UltraSearch(game, () => 0, {
   rootLimit: 16,
   branchLimits: [14, 10, 7],
 });
-assert.deepEqual(
-  threatAwareRootSearch.choose(rootPruningState).move,
-  { row: 2, col: 0, mirror: "/" },
+const threatAwareMove = threatAwareRootSearch.choose(rootPruningState).move;
+assert.deepEqual(threatAwareMove, { row: 2, col: 2, mirror: "/" });
+assert.ok(
+  threatAwareRootSearch.shieldExchange(
+    rootPruningState,
+    game.resolveMove(rootPruningState, threatAwareMove).state,
+  ) >= 0,
 );
 assert.equal(
   threatAwareRootSearch.shouldExtendSearch(
@@ -340,6 +344,20 @@ const commonOpeningState = game.resolveMove(game.initialState(), {
 }).state;
 assert.equal(productionSearch.isTacticalPosition(commonOpeningState), false);
 assert.equal(productionSearch.softTiming(commonOpeningState, 0).softDeadline, 2750);
+const openingSafetySearch = new UltraSearch(game, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 2,
+  rootLimit: 16,
+  branchLimits: [22, 14, 10],
+});
+const openingSafetyMove = openingSafetySearch.choose(commonOpeningState).move;
+assert.deepEqual(openingSafetyMove, { row: 8, col: 1, mirror: "\\" });
+assert.ok(
+  openingSafetySearch.shieldExchange(
+    commonOpeningState,
+    game.resolveMove(commonOpeningState, openingSafetyMove).state,
+  ) >= 0,
+);
 const lateTimingState = game.initialState();
 for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
   lateTimingState.board[row - 1][col - 1] = mirror;
