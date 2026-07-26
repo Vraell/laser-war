@@ -32,12 +32,16 @@ assert.equal(
 );
 assert.equal(
   translate("fr", "sideWins", { side: translate("fr", "bottom") }),
-  "Le joueur du bas gagne",
+  "Victoire des rouges",
 );
 assert.equal(
   translate("fr", "sideToMove", { side: translate("fr", "top") }),
-  "Au tour du joueur du haut",
+  "Aux bleus de jouer",
 );
+assert.equal(translate("en", "localMatchup"), "Red vs Blue");
+assert.equal(translate("fr", "localMatchup"), "Rouge contre Bleu");
+assert.equal(translate("en", "topKing"), "blue king");
+assert.equal(translate("fr", "bottomKing"), "roi rouge");
 assert.equal(translate("en", "resultDetail", { difficulty: "Hard", count: "17 moves" }), "Hard · 17 moves");
 assert.equal(translate("en", "computerMatchup", { difficulty: "Ultra" }), "You vs Ultra AI");
 assert.equal(translate("fr", "computerMatchup", { difficulty: "Ultra" }), "Vous contre l'IA Ultra");

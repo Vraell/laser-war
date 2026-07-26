@@ -1,4 +1,4 @@
-import { exactJointPathWitness } from "./exact_routes.js?v=0.11.9";
+import { exactJointPathWitness } from "./exact_routes.js?v=0.11.10";
 
 export const BOARD_SIZE = 9;
 export const MIDDLE_ROW = 4;

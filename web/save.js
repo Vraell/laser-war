@@ -27,6 +27,7 @@ export function buildActiveSave(session) {
     version: SAVE_VERSION,
     matchId: session.id,
     startedAt: session.startedAt,
+    gameVersion: session.gameVersion,
     mode: session.mode,
     difficulty: session.difficulty,
     moves: session.history.map((record) => ({

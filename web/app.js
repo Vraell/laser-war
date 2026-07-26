@@ -1,21 +1,22 @@
-import { BOARD_SIZE, Cell, Game, cloneState } from "./engine.js?v=0.11.9";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.11.10";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.11.9";
+} from "./save.js?v=0.11.10";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.11.9";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.9";
-import { beamPoints } from "./beam.js?v=0.11.9";
-import { drawDetailKey } from "./result.js?v=0.11.9";
+} from "./progress.js?v=0.11.10";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.11.10";
+import { beamPoints } from "./beam.js?v=0.11.10";
+import { drawDetailKey } from "./result.js?v=0.11.10";
 
 const SAVE_KEY = "laser-war.web.v1";
+const GAME_VERSION = "v0.11.10";
 const BEAM_VISIBLE_MS = 920;
 const game = new Game();
 
@@ -94,7 +95,7 @@ function matchupLabel() {
 
 /** Build the localized date and participant line shared by the UI and clipboard. */
 function matchMetadata() {
-  return `${matchDate()} · ${matchupLabel()}`;
+  return `${matchDate()} · ${matchupLabel()} · ${session.gameVersion}`;
 }
 
 /** Create an empty browser match session with stable identity metadata. */
@@ -103,10 +104,12 @@ function createSession(
   difficulty = "medium",
   id = createMatchId(),
   startedAt = new Date().toISOString(),
+  gameVersion = GAME_VERSION,
 ) {
   return {
     id,
     startedAt,
+    gameVersion,
     mode,
     difficulty,
     state: game.initialState(),
@@ -197,8 +200,8 @@ function beginComputerTurn() {
   cancelComputerTurn(true, false);
   inputLocked = true;
   elements.status.textContent = t("computerThinking");
-  elements.statusLight.style.background = "var(--cyan)";
-  elements.statusLight.style.color = "var(--cyan)";
+  elements.statusLight.style.background = "var(--player-blue)";
+  elements.statusLight.style.color = "var(--player-blue)";
   elements.aiDetail.classList.add("thinking");
   const started = performance.now();
   const difficulty = session.difficulty;
@@ -213,7 +216,7 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.11.9", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.11.10", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {
@@ -314,6 +317,13 @@ function renderMirrorSelection() {
 function renderBoard() {
   const legal = new Set(legalMoves.map(moveKey));
   const forbidden = game.mirrorForbiddenSquares(session.state.board);
+  const latestMove = session.history.at(-1)?.move;
+  const mirrorOwners = new Map(
+    session.history.map((record, index) => [
+      `${record.move.row},${record.move.col}`,
+      index % 2 === 0 ? "red" : "blue",
+    ]),
+  );
   elements.board.replaceChildren();
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
@@ -334,6 +344,7 @@ function renderBoard() {
       cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-label", cellLabel(row, col, value, moveIsLegal, explainable));
       if (forbidden.has(`${row},${col}`)) cell.classList.add("blocked");
+      if (latestMove?.row === row && latestMove?.col === col) cell.classList.add("last-move");
       if (moveIsLegal && canAct) cell.classList.add("legal");
       if (explainable) cell.classList.add("explainable");
       cell.disabled = !canAct;
@@ -351,25 +362,29 @@ function renderBoard() {
         }
       });
       cell.addEventListener("mouseleave", () => cell.classList.remove("preview"));
-      if (value !== Cell.EMPTY) cell.append(pieceFor(value));
+      if (value !== Cell.EMPTY) {
+        cell.append(pieceFor(value, row, mirrorOwners.get(`${row},${col}`)));
+      }
       elements.board.append(cell);
     }
   }
 }
 
 /** Build the visual token for one nonempty engine cell. */
-function pieceFor(value) {
+function pieceFor(value, row, mirrorOwner = null) {
   const piece = document.createElement("span");
   piece.className = "piece";
   if (value === Cell.SLASH || value === Cell.BACKSLASH) {
     piece.classList.add("mirror");
+    if (mirrorOwner) piece.classList.add(`${mirrorOwner}-piece`);
     piece.style.setProperty("--mirror-angle", value === Cell.SLASH ? "45deg" : "-45deg");
   } else if (value === Cell.SHIELD) {
-    piece.classList.add("shield");
+    piece.classList.add("shield", row < MIDDLE_ROW ? "blue-piece" : "red-piece");
   } else {
-    piece.classList.add("king");
-    piece.style.setProperty("--king-color", value === Cell.TOP_KING ? "var(--cyan)" : "var(--amber)");
-    piece.style.setProperty("--king-fill", value === Cell.TOP_KING ? "#176f82" : "#8b5a12");
+    piece.classList.add(
+      "king",
+      value === Cell.TOP_KING ? "blue-piece" : "red-piece",
+    );
   }
   return piece;
 }
@@ -400,22 +415,22 @@ function explainIllegalMove(move) {
 /** Render the current turn, search, or terminal status. */
 function renderStatus() {
   let text = "";
-  let color = "var(--amber)";
+  let color = "var(--player-red)";
   if (session.state.winner) {
     text = t("sideWins", { side: t(session.state.winner) });
-    color = session.state.winner === "bottom" ? "var(--amber)" : "var(--cyan)";
+    color = session.state.winner === "bottom" ? "var(--player-red)" : "var(--player-blue)";
   } else if (session.state.draw) {
     text = t("draw");
     color = "var(--muted)";
   } else if (inputLocked && computerTurn()) {
     text = t("computerThinking");
-    color = "var(--cyan)";
+    color = "var(--player-blue)";
   } else if (session.mode === "computer") {
     text = session.state.turn === "bottom" ? t("yourTurn") : t("computerTurn");
-    color = session.state.turn === "bottom" ? "var(--amber)" : "var(--cyan)";
+    color = session.state.turn === "bottom" ? "var(--player-red)" : "var(--player-blue)";
   } else {
     text = t("sideToMove", { side: t(session.state.turn) });
-    color = session.state.turn === "bottom" ? "var(--amber)" : "var(--cyan)";
+    color = session.state.turn === "bottom" ? "var(--player-red)" : "var(--player-blue)";
   }
   elements.status.textContent = text;
   elements.statusLight.style.background = color;
@@ -487,8 +502,8 @@ function renderBeams(beams) {
   beams.forEach((beam, index) => {
     const points = beamPoints(beam, index);
     const pointString = points.map((point) => point.join(",")).join(" ");
-    const color = index === 0 ? "var(--red)" : "var(--cyan)";
-    for (const className of ["beam-glow", "beam-core"]) {
+    const color = "var(--laser)";
+    for (const className of ["beam-glow", "beam-core", "beam-flow"]) {
       const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
       line.setAttribute("points", pointString);
       line.setAttribute("pathLength", "1");
@@ -539,7 +554,7 @@ function showResult(playSound = true) {
   } else if (session.mode === "computer") {
     const victory = session.state.winner === "bottom";
     elements.resultTitle.textContent = victory ? t("victory") : t("defeat");
-    elements.resultTitle.style.color = victory ? "var(--amber)" : "var(--cyan)";
+    elements.resultTitle.style.color = victory ? "var(--player-red)" : "var(--player-blue)";
     elements.resultDetail.textContent = ultraUnlockedThisMatch
       ? t("ultraUnlocked")
       : t("resultDetail", {
@@ -548,7 +563,9 @@ function showResult(playSound = true) {
       });
   } else {
     elements.resultTitle.textContent = t("sideWins", { side: t(session.state.winner) }).toUpperCase();
-    elements.resultTitle.style.color = session.state.winner === "bottom" ? "var(--amber)" : "var(--cyan)";
+    elements.resultTitle.style.color = session.state.winner === "bottom"
+      ? "var(--player-red)"
+      : "var(--player-blue)";
     elements.resultDetail.textContent = moveCount(session.history.length);
   }
   if (playSound) audio.play("victory");
@@ -658,6 +675,7 @@ function sessionFromSave(data) {
     data.difficulty,
     data.matchId || legacyMatchId(data),
     data.startedAt || new Date().toISOString(),
+    data.gameVersion || GAME_VERSION,
   );
   for (const item of data.moves || []) {
     const before = cloneState(restored.state);
@@ -853,7 +871,7 @@ class Audio {
       }[name] || [440, 0.08];
       oscillator.frequency.setValueAtTime(settings[0], this.context.currentTime);
       oscillator.frequency.exponentialRampToValueAtTime(settings[0] * 1.8, this.context.currentTime + settings[1]);
-      gain.gain.setValueAtTime(0.09, this.context.currentTime);
+      gain.gain.setValueAtTime(0.117, this.context.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, this.context.currentTime + settings[1]);
       oscillator.connect(gain).connect(this.context.destination);
       oscillator.start();
