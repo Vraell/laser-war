@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.18";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.19";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -350,15 +350,15 @@ export class UltraSearch {
     );
     const opponent = state.turn === "top" ? "bottom" : "top";
     const nonLosing = ranked.filter((candidate) => candidate.state.winner !== opponent);
-    const immediateSurvivors = depth === 1
-      ? nonLosing.filter((candidate) => !this.opponentCanWinNext(candidate.state))
-      : nonLosing;
+    const immediateSurvivors = nonLosing.filter(
+      (candidate) => !this.opponentCanWinNext(candidate.state),
+    );
     const safeRanked = immediateSurvivors.length
       ? immediateSurvivors
       : nonLosing.length ? nonLosing : ranked;
-    const safeNonSacrificing = depth === 1
-      ? nonSacrificing.filter((candidate) => !this.opponentCanWinNext(candidate.state))
-      : nonSacrificing;
+    const safeNonSacrificing = nonSacrificing.filter(
+      (candidate) => !this.opponentCanWinNext(candidate.state),
+    );
     const candidates = this.isTacticalPosition(state) || !safeNonSacrificing.length
       ? safeRanked
       : safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
