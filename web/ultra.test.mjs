@@ -330,7 +330,7 @@ assert.equal(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infi
 
 const productionSearch = new UltraSearch(game, () => 0);
 assert.ok(productionSearch.profile.maxDepth >= 12);
-assert.equal(productionSearch.profile.timeLimit, 8000);
+assert.equal(productionSearch.profile.timeLimit, 10000);
 assert.equal(productionSearch.profile.rootLimit, 16);
 assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
