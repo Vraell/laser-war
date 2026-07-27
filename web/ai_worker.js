@@ -1,5 +1,5 @@
-import { createComputerPlayer } from "./ai.js?v=0.11.15";
-import { Game } from "./engine.js?v=0.11.15";
+import { createComputerPlayer } from "./ai.js?v=0.11.16";
+import { Game } from "./engine.js?v=0.11.16";
 
 const game = new Game();
 const chooseMove = createComputerPlayer(game);

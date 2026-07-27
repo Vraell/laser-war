@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.15";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.16";
 
 const ULTRA_PROFILE = {
   timeLimit: 8000,
@@ -198,7 +198,11 @@ export class UltraSearch {
     if (!children.length) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: 0 };
     this.childrenCache.set(rootKey, children);
 
-    const fallback = this.orderedChildren(state, 0).find(
+    const orderedFallback = this.orderedChildren(state, 0);
+    const fallback = orderedFallback.find(
+      ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
+        && this.strictChild(state, move, child),
+    ) || orderedFallback.find(
       ({ move, state: child }) => this.strictChild(state, move, child),
     );
     if (!fallback) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: this.now() - started };
@@ -321,9 +325,14 @@ export class UltraSearch {
     const nonSacrificing = ranked.filter(
       (candidate) => this.shieldExchange(state, candidate.state) >= 0,
     );
+    const opponent = state.turn === "top" ? "bottom" : "top";
+    const nonLosing = ranked.filter((candidate) => candidate.state.winner !== opponent);
+    const safeRanked = nonLosing.length ? nonLosing : ranked;
     const candidates = this.isTacticalPosition(state) || !nonSacrificing.length
-      ? ranked
-      : nonSacrificing;
+      ? safeRanked
+      : nonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
+        ? nonSacrificing.filter((candidate) => candidate.state.winner !== opponent)
+        : safeRanked;
     for (const candidate of candidates) {
       this.checkInterrupted();
       if (this.strictChild(state, candidate.move, candidate.state)) {
