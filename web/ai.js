@@ -1,7 +1,7 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.16";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.17";
 
 const ULTRA_PROFILE = {
-  timeLimit: 8000,
+  timeLimit: 10000,
   maxDepth: 12,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
@@ -182,6 +182,7 @@ export class UltraSearch {
     this.orderingEvaluationCache = new Map();
     this.forcingCache = new Map();
     this.forcedExposureCache = new Map();
+    this.rootSurvivalCache = new Map();
     this.stateKeys = new WeakMap();
   }
 
@@ -327,11 +328,19 @@ export class UltraSearch {
     );
     const opponent = state.turn === "top" ? "bottom" : "top";
     const nonLosing = ranked.filter((candidate) => candidate.state.winner !== opponent);
-    const safeRanked = nonLosing.length ? nonLosing : ranked;
-    const candidates = this.isTacticalPosition(state) || !nonSacrificing.length
+    const immediateSurvivors = nonLosing.filter(
+      (candidate) => !this.opponentCanWinNext(candidate.state),
+    );
+    const safeRanked = immediateSurvivors.length
+      ? immediateSurvivors
+      : nonLosing.length ? nonLosing : ranked;
+    const safeNonSacrificing = nonSacrificing.filter(
+      (candidate) => !this.opponentCanWinNext(candidate.state),
+    );
+    const candidates = this.isTacticalPosition(state) || !safeNonSacrificing.length
       ? safeRanked
-      : nonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
-        ? nonSacrificing.filter((candidate) => candidate.state.winner !== opponent)
+      : safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
+        ? safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent)
         : safeRanked;
     for (const candidate of candidates) {
       this.checkInterrupted();
@@ -340,6 +349,23 @@ export class UltraSearch {
       }
     }
     throw new Error("Ultra search found no fully legal root move.");
+  }
+
+  /** Reject root moves that allow an immediate legal king hit in reply. */
+  opponentCanWinNext(state) {
+    const key = this.keyForState(state);
+    if (this.rootSurvivalCache.has(key)) return this.rootSurvivalCache.get(key);
+    if (state.winner || state.draw) {
+      const losing = state.winner !== state.turn;
+      this.rootSurvivalCache.set(key, losing);
+      return losing;
+    }
+    const opponent = state.turn;
+    const canWin = this.game.legalChildren(state, false).some(({ move, state: child }) => (
+      child.winner === opponent && this.game.isLegalMove(state, move)
+    ));
+    this.rootSurvivalCache.set(key, canWin);
+    return canWin;
   }
 
   /** Evaluate a subtree with selective alpha-beta negamax. */
@@ -686,7 +712,7 @@ export class UltraSearch {
     const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
     const latePosition = mirrors >= 23;
     const tacticalEmergency = this.isTacticalPosition(state);
-    const softLimit = latePosition ? 8000 : tacticalEmergency ? 6250 : mirrors >= 12 ? 4500 : 2750;
+    const softLimit = latePosition ? 10000 : tacticalEmergency ? 7500 : mirrors >= 12 ? 4500 : 2750;
     return {
       latePosition,
       softDeadline: Math.min(this.deadline, started + softLimit),
