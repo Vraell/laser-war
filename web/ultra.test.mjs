@@ -335,7 +335,7 @@ assert.equal(productionSearch.profile.rootLimit, 16);
 assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
-  softDeadline: 2750,
+  softDeadline: 4000,
 });
 const commonOpeningState = game.resolveMove(game.initialState(), {
   row: 4,
@@ -343,7 +343,7 @@ const commonOpeningState = game.resolveMove(game.initialState(), {
   mirror: "/",
 }).state;
 assert.equal(productionSearch.isTacticalPosition(commonOpeningState), false);
-assert.equal(productionSearch.softTiming(commonOpeningState, 0).softDeadline, 2750);
+assert.equal(productionSearch.softTiming(commonOpeningState, 0).softDeadline, 4000);
 const openingSafetySearch = new UltraSearch(game, () => 0, {
   timeLimit: Infinity,
   maxDepth: 2,

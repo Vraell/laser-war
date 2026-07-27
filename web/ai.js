@@ -328,15 +328,15 @@ export class UltraSearch {
     );
     const opponent = state.turn === "top" ? "bottom" : "top";
     const nonLosing = ranked.filter((candidate) => candidate.state.winner !== opponent);
-    const immediateSurvivors = nonLosing.filter(
-      (candidate) => !this.opponentCanWinNext(candidate.state),
-    );
+    const immediateSurvivors = depth === 1
+      ? nonLosing.filter((candidate) => !this.opponentCanWinNext(candidate.state))
+      : nonLosing;
     const safeRanked = immediateSurvivors.length
       ? immediateSurvivors
       : nonLosing.length ? nonLosing : ranked;
-    const safeNonSacrificing = nonSacrificing.filter(
-      (candidate) => !this.opponentCanWinNext(candidate.state),
-    );
+    const safeNonSacrificing = depth === 1
+      ? nonSacrificing.filter((candidate) => !this.opponentCanWinNext(candidate.state))
+      : nonSacrificing;
     const candidates = this.isTacticalPosition(state) || !safeNonSacrificing.length
       ? safeRanked
       : safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
@@ -361,9 +361,10 @@ export class UltraSearch {
       return losing;
     }
     const opponent = state.turn;
-    const canWin = this.game.legalChildren(state, false).some(({ move, state: child }) => (
-      child.winner === opponent && this.game.isLegalMove(state, move)
-    ));
+    const canWin = this.game.legalChildren(state, false).some(({ move, state: child }) => {
+      this.checkInterrupted();
+      return child.winner === opponent && this.game.isLegalMove(state, move);
+    });
     this.rootSurvivalCache.set(key, canWin);
     return canWin;
   }
@@ -712,7 +713,7 @@ export class UltraSearch {
     const mirrors = state.board.flat().filter((cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell)).length;
     const latePosition = mirrors >= 23;
     const tacticalEmergency = this.isTacticalPosition(state);
-    const softLimit = latePosition ? 10000 : tacticalEmergency ? 7500 : mirrors >= 12 ? 4500 : 2750;
+    const softLimit = latePosition ? 10000 : tacticalEmergency ? 8000 : mirrors >= 12 ? 6000 : 4000;
     return {
       latePosition,
       softDeadline: Math.min(this.deadline, started + softLimit),
