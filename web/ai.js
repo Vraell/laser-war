@@ -1,4 +1,4 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.17";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.18";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -161,11 +161,12 @@ function standardMove(game, state, difficulty, random) {
 
 export class UltraSearch {
   /** Initialize caches and timing for one Ultra search. */
-  constructor(game, now, profile = ULTRA_PROFILE, onProgress = () => {}) {
+  constructor(game, now, profile = ULTRA_PROFILE, onProgress = () => {}, random = () => 0) {
     this.game = game;
     this.now = now;
     this.profile = profile;
     this.onProgress = onProgress;
+    this.random = random;
     this.deadline = Infinity;
     this.nodes = 0;
     this.activeDepth = 0;
@@ -251,13 +252,34 @@ export class UltraSearch {
         this.deadline = configuredDeadline;
       }
     }
+    const variedMove = this.openingVariation(state, rootKey, bestMove, bestScore, timing);
     return {
-      move: bestMove,
+      move: variedMove,
       score: bestScore,
       depth: completedDepth,
       nodes: this.nodes,
       elapsed: this.now() - started,
     };
+  }
+
+  /** Add restrained variety among near-equal quiet opening choices. */
+  openingVariation(state, rootKey, bestMove, bestScore, timing) {
+    const mirrors = state.board.flat().filter(
+      (cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell),
+    ).length;
+    if (mirrors >= 8 || timing.latePosition || this.isTacticalPosition(state)) return bestMove;
+    const scores = this.rootScores.get(rootKey);
+    if (!scores) return bestMove;
+    const candidates = [...this.childrenCache.get(rootKey) || []]
+      .filter(({ move, state: child }) => {
+        const score = scores.get(moveKey(move));
+        return score !== undefined
+          && score >= bestScore - 20
+          && child.winner !== (state.turn === "top" ? "bottom" : "top")
+          && this.strictChild(state, move, child);
+      });
+    if (candidates.length < 2) return bestMove;
+    return candidates[Math.floor(this.random() * candidates.length)].move;
   }
 
   /** Spend the hard budget only for unstable positions with a concrete tactical signal. */
@@ -746,10 +768,11 @@ export function createComputerPlayer(game) {
     if (difficulty !== "ultra") return chooseComputerMove(game, state, difficulty, options);
     const now = options.now || (() => performance.now());
     if (!ultraSearch) {
-      ultraSearch = new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress);
+      ultraSearch = new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress, options.random || Math.random);
     } else {
       ultraSearch.now = now;
       ultraSearch.onProgress = options.onProgress || (() => {});
+      ultraSearch.random = options.random || Math.random;
     }
     return ultraSearch.choose(state);
   };
