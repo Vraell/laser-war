@@ -26,10 +26,21 @@ jobs:
           fetch-depth: 2
 
       - name: Run tests
-        run: node --test web/*.test.mjs
+        run: node --test web/*.test.mjs scripts/arena_stats.test.mjs
+
+      - name: Run tactical corpus
+        run: node scripts/tactical_benchmark.mjs
 
       - name: Compare AI strength
-        run: node scripts/elo_benchmark.mjs --pairs 4 --max-plies 54 --baseline-ref HEAD^
+        run: >-
+          node scripts/elo_benchmark.mjs
+          --pairs 32
+          --difficulties ultra
+          --opening-plies 0,2,4,6,8,10
+          --max-plies 72
+          --ultra-time 120
+          --gate nonregression
+          --baseline-ref HEAD^
 
       - name: Build browser game
         run: |

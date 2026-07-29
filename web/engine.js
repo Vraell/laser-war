@@ -24,6 +24,10 @@ const SLASH = { N: "E", E: "N", S: "W", W: "S" };
 const BACKSLASH = { N: "W", W: "N", S: "E", E: "S" };
 const TURNS = { top: "bottom", bottom: "top" };
 const DIRECTION_INDEX = { N: 0, E: 1, S: 2, W: 3 };
+const DIRECTION_NAMES = ["N", "E", "S", "W"];
+const DIRECTION_STEPS = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+const SLASH_INDEX = [1, 0, 3, 2];
+const BACKSLASH_INDEX = [3, 2, 1, 0];
 
 function key(row, col) {
   return `${row},${col}`;
@@ -94,6 +98,8 @@ export class Game {
     this.routeCostCache = new Map();
     this.beamCache = new Map();
     this.boardKeys = new WeakMap();
+    this.forbiddenSquaresCache = new WeakMap();
+    this.forbiddenMaskCache = new WeakMap();
   }
 
   /** Create the symmetric opening position for a new match. */
@@ -245,7 +251,26 @@ export class Game {
   }
 
   mirrorForbiddenSquares(board) {
-    return new Set([...this.laserEntrySquares, ...this.kingAdjacentSquares(board)]);
+    let forbidden = this.forbiddenSquaresCache.get(board);
+    if (!forbidden) {
+      forbidden = new Set([...this.laserEntrySquares, ...this.kingAdjacentSquares(board)]);
+      this.forbiddenSquaresCache.set(board, forbidden);
+    }
+    return forbidden;
+  }
+
+  /** Return a compact per-cell mask for forbidden mirror turns. */
+  mirrorForbiddenMask(board) {
+    let mask = this.forbiddenMaskCache.get(board);
+    if (!mask) {
+      mask = new Uint8Array(BOARD_SIZE * BOARD_SIZE);
+      for (const square of this.mirrorForbiddenSquares(board)) {
+        const [row, col] = square.split(",").map(Number);
+        mask[row * BOARD_SIZE + col] = 1;
+      }
+      this.forbiddenMaskCache.set(board, mask);
+    }
+    return mask;
   }
 
   /** Derive all cells where a mirror would touch either king. */
@@ -277,11 +302,12 @@ export class Game {
 
   /** Trace one fired laser until it exits, loops, or strikes a piece. */
   traceBeam(board, source) {
-    let [row, col, direction] = source;
-    const visited = new Set();
+    let [row, col] = source;
+    let direction = DIRECTION_INDEX[source[2]];
+    const visited = new Uint8Array(BOARD_SIZE * BOARD_SIZE * 4);
     const path = [];
     while (true) {
-      const [dr, dc] = DIRS[direction];
+      const [dr, dc] = DIRECTION_STEPS[direction];
       row += dr;
       col += dc;
       if (!this.inBounds(row, col)) {
@@ -291,23 +317,23 @@ export class Game {
           hitKing: null,
           exited: true,
           looped: false,
-          exitDirection: direction,
+          exitDirection: DIRECTION_NAMES[direction],
         };
       }
-      const beamKey = `${row},${col},${direction}`;
-      if (visited.has(beamKey)) {
+      const beamIndex = (row * BOARD_SIZE + col) * 4 + direction;
+      if (visited[beamIndex]) {
         return { path, hitShield: null, hitKing: null, exited: false, looped: true };
       }
-      visited.add(beamKey);
-      path.push([row, col, direction]);
+      visited[beamIndex] = 1;
+      path.push([row, col, DIRECTION_NAMES[direction]]);
       const cell = board[row][col];
       if (cell === Cell.EMPTY) continue;
       if (cell === Cell.SLASH) {
-        direction = SLASH[direction];
+        direction = SLASH_INDEX[direction];
         continue;
       }
       if (cell === Cell.BACKSLASH) {
-        direction = BACKSLASH[direction];
+        direction = BACKSLASH_INDEX[direction];
         continue;
       }
       if (cell === Cell.SHIELD) {
@@ -455,49 +481,65 @@ export class Game {
 
   /** Find shortest individual routes with cost-first graph search. */
   routeCosts(board, source) {
-    const forbiddenTurns = this.mirrorForbiddenSquares(board);
-    const sourceKey = `${source[0]},${source[1]},${source[2]}`;
-    const distances = new Map([[sourceKey, 0]]);
+    const forbiddenTurns = this.mirrorForbiddenMask(board);
+    const distances = new Int16Array(BOARD_SIZE * BOARD_SIZE * 4);
+    distances.fill(32767);
     const frontier = [];
     const costs = {};
-    pushCost(frontier, [0, source]);
+    let targetsFound = 0;
+    pushCost(frontier, [0, [source[0], source[1], DIRECTION_INDEX[source[2]]]]);
 
-    while (frontier.length && Object.keys(costs).length < 2) {
+    while (frontier.length && targetsFound < 2) {
       const [cost, [row, col, direction]] = popCost(frontier);
-      if (cost !== distances.get(`${row},${col},${direction}`)) continue;
-      const [dr, dc] = DIRS[direction];
+      if (this.inBounds(row, col)) {
+        const stateIndex = (row * BOARD_SIZE + col) * 4 + direction;
+        if (cost !== distances[stateIndex]) continue;
+      }
+      const [dr, dc] = DIRECTION_STEPS[direction];
       const nextRow = row + dr;
       const nextCol = col + dc;
       if (!this.inBounds(nextRow, nextCol)) continue;
+      const squareIndex = nextRow * BOARD_SIZE + nextCol;
 
       const cell = board[nextRow][nextCol];
       if (cell === Cell.TOP_KING || cell === Cell.BOTTOM_KING) {
         const target = cell === Cell.TOP_KING ? "top" : "bottom";
-        if (costs[target] === undefined) costs[target] = cost;
+        if (costs[target] === undefined) {
+          costs[target] = cost;
+          targetsFound += 1;
+        }
         continue;
       }
 
       const options = [];
       if (cell === Cell.SLASH) {
-        options.push([SLASH[direction], cost]);
+        options.push([SLASH_INDEX[direction], cost]);
       } else if (cell === Cell.BACKSLASH) {
-        options.push([BACKSLASH[direction], cost]);
+        options.push([BACKSLASH_INDEX[direction], cost]);
       } else if (cell === Cell.EMPTY) {
         options.push([direction, cost]);
-        if (!forbiddenTurns.has(key(nextRow, nextCol))) {
-          for (const turned of this.turns(direction)) options.push([turned, cost + 1]);
+        if (!forbiddenTurns[squareIndex]) {
+          if (direction === DIRECTION_INDEX.N || direction === DIRECTION_INDEX.S) {
+            options.push([DIRECTION_INDEX.E, cost + 1], [DIRECTION_INDEX.W, cost + 1]);
+          } else {
+            options.push([DIRECTION_INDEX.N, cost + 1], [DIRECTION_INDEX.S, cost + 1]);
+          }
         }
       } else if (cell === Cell.SHIELD) {
         options.push([direction, cost + 1]);
-        if (!forbiddenTurns.has(key(nextRow, nextCol))) {
-          for (const turned of this.turns(direction)) options.push([turned, cost + 2]);
+        if (!forbiddenTurns[squareIndex]) {
+          if (direction === DIRECTION_INDEX.N || direction === DIRECTION_INDEX.S) {
+            options.push([DIRECTION_INDEX.E, cost + 2], [DIRECTION_INDEX.W, cost + 2]);
+          } else {
+            options.push([DIRECTION_INDEX.N, cost + 2], [DIRECTION_INDEX.S, cost + 2]);
+          }
         }
       }
 
       for (const [nextDirection, nextCost] of options) {
-        const nextKey = `${nextRow},${nextCol},${nextDirection}`;
-        if (nextCost >= (distances.get(nextKey) ?? Infinity)) continue;
-        distances.set(nextKey, nextCost);
+        const nextIndex = squareIndex * 4 + nextDirection;
+        if (nextCost >= distances[nextIndex]) continue;
+        distances[nextIndex] = nextCost;
         pushCost(frontier, [nextCost, [nextRow, nextCol, nextDirection]]);
       }
     }
@@ -610,33 +652,45 @@ export class Game {
 
   /** Explore all legal future beam turns from one laser source. */
   reachableKings(board, source) {
-    const forbiddenTurns = this.mirrorForbiddenSquares(board);
-    const reachable = new Set();
-    const seen = new Set();
-    const stack = [source];
+    const forbiddenTurns = this.mirrorForbiddenMask(board);
+    let reachable = 0;
+    const seen = new Uint8Array(BOARD_SIZE * BOARD_SIZE * 4);
+    const stack = [source[0], source[1], DIRECTION_INDEX[source[2]]];
     while (stack.length) {
-      const [row, col, direction] = stack.pop();
-      const [dr, dc] = DIRS[direction];
+      const direction = stack.pop();
+      const col = stack.pop();
+      const row = stack.pop();
+      const [dr, dc] = DIRECTION_STEPS[direction];
       const nextRow = row + dr;
       const nextCol = col + dc;
       if (!this.inBounds(nextRow, nextCol)) continue;
-      const seenKey = `${nextRow},${nextCol},${direction}`;
-      if (seen.has(seenKey)) continue;
-      seen.add(seenKey);
+      const squareIndex = nextRow * BOARD_SIZE + nextCol;
+      const seenIndex = squareIndex * 4 + direction;
+      if (seen[seenIndex]) continue;
+      seen[seenIndex] = 1;
       const cell = board[nextRow][nextCol];
-      if (cell === Cell.TOP_KING) reachable.add("top");
-      else if (cell === Cell.BOTTOM_KING) reachable.add("bottom");
-      else if (cell === Cell.SLASH) stack.push([nextRow, nextCol, SLASH[direction]]);
-      else if (cell === Cell.BACKSLASH) stack.push([nextRow, nextCol, BACKSLASH[direction]]);
+      if (cell === Cell.TOP_KING) reachable |= 1;
+      else if (cell === Cell.BOTTOM_KING) reachable |= 2;
+      else if (cell === Cell.SLASH) stack.push(nextRow, nextCol, SLASH_INDEX[direction]);
+      else if (cell === Cell.BACKSLASH) stack.push(nextRow, nextCol, BACKSLASH_INDEX[direction]);
       else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
-        stack.push([nextRow, nextCol, direction]);
-        if (!forbiddenTurns.has(key(nextRow, nextCol))) {
-          for (const turn of this.turns(direction)) stack.push([nextRow, nextCol, turn]);
+        stack.push(nextRow, nextCol, direction);
+        if (!forbiddenTurns[squareIndex]) {
+          if (direction === DIRECTION_INDEX.N || direction === DIRECTION_INDEX.S) {
+            stack.push(nextRow, nextCol, DIRECTION_INDEX.E);
+            stack.push(nextRow, nextCol, DIRECTION_INDEX.W);
+          } else {
+            stack.push(nextRow, nextCol, DIRECTION_INDEX.N);
+            stack.push(nextRow, nextCol, DIRECTION_INDEX.S);
+          }
         }
       }
-      if (reachable.size === 2) break;
+      if (reachable === 3) break;
     }
-    return reachable;
+    const result = new Set();
+    if (reachable & 1) result.add("top");
+    if (reachable & 2) result.add("bottom");
+    return result;
   }
 
   /** Score a position from the side-to-move perspective. */

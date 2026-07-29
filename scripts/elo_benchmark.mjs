@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Game } from "../web/engine.js";
+import { summarizePairs } from "./arena_stats.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const difficulties = ["easy", "medium", "hard", "ultra"];
@@ -12,13 +13,14 @@ const difficulties = ["easy", "medium", "hard", "ultra"];
 /** Parse the intentionally small command-line surface for arena runs. */
 function parseArguments(argv) {
   const options = {
-    pairs: 4,
-    maxPlies: 54,
+    pairs: 24,
+    maxPlies: 72,
     baselineRef: process.env.CI ? "HEAD^" : "HEAD",
     difficulties,
-    openingPlies: 2,
+    openingPlies: [0, 2, 4, 6, 8, 10],
     seedOffset: 0,
     ultraTime: 300,
+    gate: "nonregression",
     verbose: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -27,9 +29,12 @@ function parseArguments(argv) {
     else if (argument === "--max-plies") options.maxPlies = Number(argv[++index]);
     else if (argument === "--baseline-ref") options.baselineRef = argv[++index];
     else if (argument === "--difficulties") options.difficulties = argv[++index].split(",");
-    else if (argument === "--opening-plies") options.openingPlies = Number(argv[++index]);
+    else if (argument === "--opening-plies") {
+      options.openingPlies = argv[++index].split(",").map(Number);
+    }
     else if (argument === "--seed-offset") options.seedOffset = Number(argv[++index]);
     else if (argument === "--ultra-time") options.ultraTime = Number(argv[++index]);
+    else if (argument === "--gate") options.gate = argv[++index];
     else if (argument === "--verbose") options.verbose = true;
     else throw new Error(`Unknown argument: ${argument}`);
   }
@@ -42,12 +47,17 @@ function parseArguments(argv) {
   )) {
     throw new Error("--difficulties must contain easy, medium, hard, and/or ultra.");
   }
-  if (!Number.isInteger(options.openingPlies) || options.openingPlies < 0) {
-    throw new Error("--opening-plies must be non-negative.");
+  if (!options.openingPlies.length || options.openingPlies.some(
+    (plies) => !Number.isInteger(plies) || plies < 0,
+  )) {
+    throw new Error("--opening-plies must be comma-separated non-negative integers.");
   }
   if (!Number.isInteger(options.seedOffset)) throw new Error("--seed-offset must be an integer.");
   if (!Number.isFinite(options.ultraTime) || options.ultraTime < 50) {
     throw new Error("--ultra-time must be at least 50 milliseconds.");
+  }
+  if (!["off", "nonregression", "improvement"].includes(options.gate)) {
+    throw new Error("--gate must be off, nonregression, or improvement.");
   }
   return options;
 }
@@ -65,8 +75,13 @@ function randomSource(initialSeed) {
 async function loadAiRevision(label, source, ultraTime) {
   const directory = mkdtempSync(join(tmpdir(), `laser-war-${label}-`));
   const engineUrl = pathToFileURL(join(projectRoot, "web", "engine.js")).href;
-  const timingScale = ultraTime / 8000;
-  const scaledTiming = [8000, 6250, 4500, 2750].map(
+  const tacticsUrl = pathToFileURL(join(projectRoot, "web", "tactics.js")).href;
+  const configuredLimit = Number(source.match(/timeLimit:\s*(\d+)/)?.[1] || 10000);
+  const configuredSoft = source.match(
+    /const softLimit = latePosition \? (\d+) : tacticalEmergency \? (\d+) : mirrors >= 12 \? (\d+) : (\d+);/,
+  )?.slice(1).map(Number) || [configuredLimit, configuredLimit * 0.8, configuredLimit * 0.6, configuredLimit * 0.4];
+  const timingScale = ultraTime / configuredLimit;
+  const scaledTiming = configuredSoft.map(
     (milliseconds) => Math.max(50, Math.round(milliseconds * timingScale)),
   );
   const reserve = Math.max(5, Math.round(150 * timingScale));
@@ -74,6 +89,10 @@ async function loadAiRevision(label, source, ultraTime) {
     .replace(
       /from\s+["']\.\/engine\.js(?:\?v=[^"']+)?["']/,
       `from ${JSON.stringify(engineUrl)}`,
+    )
+    .replace(
+      /from\s+["']\.\/tactics\.js(?:\?v=[^"']+)?["']/,
+      `from ${JSON.stringify(tacticsUrl)}`,
     )
     .replace(/timeLimit:\s*\d+/, `timeLimit: ${ultraTime}`)
     .replace("this.profile.timeLimit - 150", `this.profile.timeLimit - ${reserve}`)
@@ -154,7 +173,10 @@ function playGame({
 }) {
   const game = new Game();
   let state = structuredClone(opening);
-  const random = randomSource(seed);
+  const random = {
+    candidate: randomSource(seed ^ 0x9e3779b9),
+    baseline: randomSource(seed ^ 0x9e3779b9),
+  };
   const telemetry = {
     candidate: { nodes: 0, wallMilliseconds: 0, moves: 0 },
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
@@ -167,7 +189,18 @@ function playGame({
     const owner = state.turn === candidateSide ? "candidate" : "baseline";
     const revision = owner === "candidate" ? candidate : baseline;
     const player = owner === "candidate" ? candidatePlayer : baselinePlayer;
-    const result = chooseMove(revision, player, difficulty, game, state, random);
+    let result;
+    try {
+      result = chooseMove(revision, player, difficulty, game, state, random[owner]);
+    } catch (error) {
+      return {
+        score: owner === "candidate" ? 0 : 1,
+        illegal: owner,
+        error: error instanceof Error ? error.message : String(error),
+        telemetry,
+        moves,
+      };
+    }
     telemetry[owner].nodes += result.nodes || 0;
     telemetry[owner].wallMilliseconds += result.wallMilliseconds;
     telemetry[owner].moves += 1;
@@ -222,9 +255,10 @@ function addTelemetry(total, gameResult) {
   }
 }
 
-/** Run paired games for one difficulty and print its Elo-style report. */
+/** Run color-swapped opening pairs and report pair-aware uncertainty. */
 function assessDifficulty(candidate, baseline, difficulty, options) {
   const results = [];
+  const pairScores = [];
   const telemetry = {
     candidate: { nodes: 0, wallMilliseconds: 0, moves: 0 },
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
@@ -232,8 +266,9 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
   for (let pair = 0; pair < options.pairs; pair += 1) {
     const opening = openingState(
       0xa11ce + options.seedOffset + pair * 7919,
-      options.openingPlies,
+      options.openingPlies[pair % options.openingPlies.length],
     );
+    let pairScore = 0;
     for (const candidateSide of ["top", "bottom"]) {
       const result = playGame({
         candidate,
@@ -245,34 +280,39 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
         maxPlies: options.maxPlies,
       });
       results.push(result);
+      pairScore += result.score;
       addTelemetry(telemetry, result);
       if (options.verbose) {
         const outcome = result.score === 1 ? "win" : result.score === 0 ? "loss" : "draw";
         const line = result.moves.map(({ owner, move, depth }) => (
           `${owner === "candidate" ? "C" : "B"}:${move.mirror}R${move.row + 1}C${move.col + 1}@${depth}`
         )).join(" ");
-        console.log(`  pair ${pair + 1} · candidate ${candidateSide} · ${outcome} · ${line}`);
+        console.log(
+          `  pair ${pair + 1} · candidate ${candidateSide} · ${outcome}`
+          + `${result.error ? ` · error: ${result.error}` : ""} · ${line}`,
+        );
       }
     }
+    pairScores.push(pairScore);
   }
 
+  const summary = summarizePairs(pairScores);
   const score = results.reduce((total, result) => total + result.score, 0);
   const games = results.length;
   const wins = results.filter((result) => result.score === 1).length;
   const draws = results.filter((result) => result.score === 0.5).length;
   const losses = games - wins - draws;
-  const scoreRate = score / games;
-  const [low, high] = scoreInterval(score, games);
   const illegal = results.filter((result) => result.illegal).length;
   const candidateSpeed = telemetry.candidate.wallMilliseconds / Math.max(1, telemetry.candidate.moves);
   const baselineSpeed = telemetry.baseline.wallMilliseconds / Math.max(1, telemetry.baseline.moves);
   console.log(
     `${difficulty.padEnd(6)} ${wins}-${draws}-${losses} · `
-    + `${Math.round(eloFromScore(scoreRate)) >= 0 ? "+" : ""}${Math.round(eloFromScore(scoreRate))} Elo `
-    + `[${Math.round(eloFromScore(low))}, ${Math.round(eloFromScore(high))}] · `
+    + `${Math.round(summary.elo) >= 0 ? "+" : ""}${Math.round(summary.elo)} Elo `
+    + `[${Math.round(summary.lowElo)}, ${Math.round(summary.highElo)}] · `
+    + `Ptnml ${summary.pentanomial.join("-")} · `
     + `${candidateSpeed.toFixed(1)} vs ${baselineSpeed.toFixed(1)} ms/move`,
   );
-  return { difficulty, score, games, low, high, illegal };
+  return { difficulty, score, games, illegal, pairScores, summary };
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -296,7 +336,7 @@ const assessments = options.difficulties.map(
 );
 const totalScore = assessments.reduce((total, result) => total + result.score, 0);
 const totalGames = assessments.reduce((total, result) => total + result.games, 0);
-const [, aggregateHigh] = scoreInterval(totalScore, totalGames);
+const aggregate = summarizePairs(assessments.flatMap((result) => result.pairScores));
 const illegalMoves = assessments.reduce((total, result) => total + result.illegal, 0);
 console.log(
   `overall ${totalScore.toFixed(1)}/${totalGames} · `
@@ -307,6 +347,16 @@ console.log(
 if (illegalMoves) {
   throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
 }
-if (aggregateHigh < 0.5) {
-  throw new Error("Candidate is statistically weaker than the baseline.");
+if (options.gate === "nonregression" && (
+  aggregate.scoreRate < 0.5 || aggregate.low < 0.45
+)) {
+  throw new Error(
+    `Candidate failed non-regression: score ${(aggregate.scoreRate * 100).toFixed(1)}%, `
+    + `lower bound ${(aggregate.low * 100).toFixed(1)}%.`,
+  );
+}
+if (options.gate === "improvement" && aggregate.low <= 0.5) {
+  throw new Error(
+    `Improvement is not established: lower bound ${(aggregate.low * 100).toFixed(1)}%.`,
+  );
 }
