@@ -236,7 +236,6 @@ function playMove(move, actor) {
   refreshLegalMoves();
   render();
   renderBeams(outcome.beams);
-  audio.play("place");
   audio.play(outcome.destroyed.length ? "impact" : "laser");
   saveGame();
   const matchId = session.id;
@@ -995,13 +994,8 @@ class SoundEffects {
       panel: [
         { from: 260, to: 390, duration: 0.08, gain: 0.045, type: "sine" },
       ],
-      place: [
-        { from: 210, to: 145, duration: 0.055, gain: 0.09, type: "triangle" },
-        { from: 1050, to: 720, duration: 0.04, gain: 0.03, type: "sine" },
-      ],
       laser: [
-        { from: 150, to: 920, duration: 0.22, gain: 0.105, type: "sawtooth" },
-        { from: 90, to: 340, duration: 0.24, gain: 0.07, type: "triangle" },
+        { from: 210, to: 378, duration: 0.16, gain: 0.234, type: "sine" },
       ],
       impact: [
         { from: 150, to: 820, duration: 0.18, gain: 0.09, type: "sawtooth" },

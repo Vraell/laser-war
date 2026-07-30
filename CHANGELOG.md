@@ -36,8 +36,9 @@ No unreleased changes.
 
 - Added a persistent sound control to both the main menu and match screen.
 - Expanded the procedural sound set with distinct cues for selection,
-  confirmation, panel changes, mirror placement, laser travel, shield impact,
-  illegal moves, turn handoff, log copy, victory, defeat, and draws.
+  confirmation, panel changes, shield impact, illegal moves, turn handoff, log
+  copy, victory, defeat, and draws, while retaining the original clean
+  single-sweep laser sound.
 - Differentiated terminal audio so a defeat or draw no longer reuses the victory
   cue.
 - Added restrained warning and success treatments to transient messages while
