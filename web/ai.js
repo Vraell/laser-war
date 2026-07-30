@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.1";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.1";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.2";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.2";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -159,7 +159,7 @@ function standardMove(game, state, difficulty, random) {
 }
 
 export class UltraSearch {
-  /** Initialize caches and timing for one Ultra search. */
+  /** Initialize one reusable Ultra search controller. */
   constructor(game, now, profile = ULTRA_PROFILE, onProgress = () => {}, random = () => 0) {
     this.game = game;
     this.now = now;
@@ -188,12 +188,32 @@ export class UltraSearch {
     this.bestCompleted = null;
   }
 
+  /** Discard turn-local heuristics so an old root cannot bias a new position. */
+  resetForTurn() {
+    this.nodes = 0;
+    this.activeDepth = 0;
+    this.lastProgressAt = -Infinity;
+    this.ordering.clear();
+    this.rootScores.clear();
+    this.history.clear();
+    this.killers.clear();
+    this.cache.clear();
+    this.childrenCache.clear();
+    this.legalityCache.clear();
+    this.fastLegalityCache.clear();
+    this.evaluationCache.clear();
+    this.orderingEvaluationCache.clear();
+    this.forcingCache.clear();
+    this.forcedExposureCache.clear();
+    this.rootSurvivalCache.clear();
+    this.stateKeys = new WeakMap();
+    this.shieldMetricsCache = new WeakMap();
+    this.bestCompleted = null;
+  }
+
   /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
-    this.cache.clear();
-    this.bestCompleted = null;
-    this.activeDepth = 0;
-    this.nodes = 0;
+    this.resetForTurn();
     const started = this.now();
     this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
@@ -919,7 +939,7 @@ export function chooseComputerMove(game, state, difficulty = "medium", options =
     : standardMove(game, state, difficulty, random);
 }
 
-/** Create a match-scoped player that preserves Ultra's search knowledge. */
+/** Create a match-scoped player with isolated turn-local Ultra heuristics. */
 export function createComputerPlayer(game) {
   let ultraSearch = null;
   return (state, difficulty = "medium", options = {}) => {

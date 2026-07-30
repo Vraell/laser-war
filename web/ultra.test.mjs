@@ -517,6 +517,38 @@ assert.equal(
 const invertedMateSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 assert.deepEqual(invertedMateSearch.choose(invertedMateState).move, invertedMateMove);
 
+const slowFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_slow_14_move_log.json", import.meta.url),
+));
+const persistentGame = new Game();
+const persistentSearch = new UltraSearch(persistentGame, () => 0, {
+  ...TEST_PROFILE,
+  maxDepth: 3,
+  rootLimit: 16,
+  branchLimits: [22, 14, 10],
+});
+let persistentState = persistentGame.initialState();
+for (let index = 0; index < slowFixture.moves.length - 1; index += 1) {
+  if (index % 2 === 1) persistentSearch.choose(persistentState);
+  const [row, col, mirror] = slowFixture.moves[index];
+  persistentState = persistentGame.resolveMove(persistentState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }, false, false).state;
+}
+const persistentResult = persistentSearch.choose(persistentState);
+const [expectedRow, expectedCol, expectedMirror] = slowFixture.expectedMoveBeforePly14;
+assert.deepEqual(
+  persistentResult.move,
+  { row: expectedRow - 1, col: expectedCol - 1, mirror: expectedMirror },
+  "Earlier Ultra turns must not hide the forcing move at ply 14.",
+);
+assert.ok(
+  persistentResult.score >= 9_900,
+  `Ultra should prove the forcing line, not settle for ${persistentResult.score}.`,
+);
+
 console.log(
   `Ultra horizon check passed at depth ${result.depth} `
   + `(${result.nodes.toLocaleString()} positions, ${Math.round(result.elapsed)} ms).`,

@@ -13,6 +13,47 @@ versions.
 
 No unreleased changes.
 
+## v0.13.2 - 2026-07-29
+
+### Fixed
+
+- Cleared Ultra's turn-local history, killer moves, root ordering, partial child
+  lists, tactical verdicts, and evaluation caches before every new move.
+  Retaining them across turns could change selective root membership, hide a
+  forcing win, and make a later move consume the full browser watchdog.
+- Kept the engine's exact route witnesses shared because those immutable board
+  results remain sound; only search heuristics and partial search products are
+  isolated per turn.
+- Bumped browser cache keys so active installations receive the corrected
+  worker and AI modules.
+- Doubled the completed laser volley's visible duration without changing its
+  travel speed, and replaced the single moving beam highlight with five evenly
+  spaced particles.
+
+### Validation
+
+- Added the reported 14-ply game as a deterministic persistent-search
+  regression. Ultra must find `R3C8 /` with a forcing score after analyzing all
+  preceding computer turns.
+
+#### Arena strength
+
+Measured against `v0.13.1` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair). Intervals are 95% paired-bootstrap
+confidence intervals. These are relative Elo changes, not absolute ratings.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 30-4-30 | 0 | 0 to 0 |
+| Medium | 30-4-30 | 0 | 0 to 0 |
+| Hard | 30-4-30 | 0 | 0 to 0 |
+| Ultra | 30-4-30 | 0 | 0 to 0 |
+
+The deterministic arena did not reach the reported forcing position, so the
+paired result is exactly neutral. The dedicated replay distinguishes the
+versions: `v0.13.2` proves the forcing line after the prior turns, while the old
+retained heuristics miss it.
+
 ## v0.13.1 - 2026-07-29
 
 ### Fixed

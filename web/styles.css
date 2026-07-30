@@ -608,7 +608,7 @@ button.quiet {
 .beam-flow {
   stroke: rgba(255, 255, 255, 0.72);
   stroke-width: 3;
-  stroke-dasharray: 0.018 0.982;
+  stroke-dasharray: 0.014 0.186;
   stroke-dashoffset: 1;
   opacity: 0;
   animation: beam-flow 2.4s 700ms ease-in-out infinite;
