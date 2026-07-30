@@ -10,6 +10,7 @@ const requiredNotices = [
   "assets/logic-solver-LICENSE.txt",
   "assets/lucide-LICENSE.txt",
 ];
+const requiredDocuments = ["docs/ULTRA_EVALUATION.pdf"];
 const references = [
   /(?:from\s+|new Worker\()\s*["'](\.\/[^"'?]+)/g,
   /(?:src|href)=["']([^"'?#]+\.(?:js|css|png|webp|ttf))/g,
@@ -35,6 +36,9 @@ checkReferences(join(sourceRoot, "index.html"), join(buildRoot, "index.html"));
 checkReferences(join(sourceRoot, "styles.css"), join(buildRoot, "styles.css"));
 for (const filename of requiredNotices) {
   assert.ok(existsSync(join(buildRoot, filename)), `Build is missing required notice ${filename}`);
+}
+for (const filename of requiredDocuments) {
+  assert.ok(existsSync(join(buildRoot, filename)), `Build is missing required document ${filename}`);
 }
 
 console.log("Web deployment artifact is complete.");

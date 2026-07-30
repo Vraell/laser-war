@@ -178,6 +178,7 @@ assert.deepEqual(Object.keys(protectedComponents), [
   "shieldCount",
   "shieldShape",
   "reachability",
+  "assignmentControl",
   "routeControl",
   "exposure",
 ]);
@@ -547,6 +548,69 @@ assert.deepEqual(
 assert.ok(
   persistentResult.score >= 9_900,
   `Ultra should prove the forcing line, not settle for ${persistentResult.score}.`,
+);
+
+const assignmentFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_26_move_log.json", import.meta.url),
+));
+const assignmentGame = new Game();
+let assignmentState = assignmentGame.initialState();
+for (const [row, col, mirror] of assignmentFixture.moves.slice(0, 15)) {
+  assignmentState = assignmentGame.resolveMove(assignmentState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const assignmentSearch = new UltraSearch(assignmentGame, () => 0, {
+  ...TEST_PROFILE,
+  maxDepth: 4,
+  rootLimit: 16,
+  branchLimits: [22, 14, 10],
+});
+const reportedBlunder = { row: 2, col: 2, mirror: "\\" };
+const blunderState = assignmentGame.resolveMove(assignmentState, reportedBlunder).state;
+assert.equal(
+  assignmentSearch.opponentCanClaimDedicatedLaser(blunderState),
+  true,
+  "The reported move must expose a permanent one-laser assignment lock.",
+);
+const exactThreatSearch = new UltraSearch(assignmentGame, () => 0, TEST_PROFILE);
+let exactThreatChecks = 0;
+exactThreatSearch.strictChild = (_parent, _move, child, allowExact = true) => {
+  if (!allowExact) return null;
+  exactThreatChecks += 1;
+  return child;
+};
+assert.equal(
+  exactThreatSearch.opponentCanClaimDedicatedLaser(blunderState),
+  true,
+  "A concrete assignment threat must fall back to exact legality.",
+);
+assert.ok(exactThreatChecks > 0);
+const assignmentResult = assignmentSearch.choose(assignmentState);
+const assignmentChild = assignmentGame.resolveMove(assignmentState, assignmentResult.move).state;
+assert.equal(
+  assignmentSearch.opponentCanClaimDedicatedLaser(assignmentChild),
+  false,
+  "Ultra must reject an avoidable permanent assignment lock.",
+);
+assert.notDeepEqual(assignmentResult.move, reportedBlunder);
+
+const exactFallbackGame = new Game();
+exactFallbackGame.jointPathPreservedFast = () => false;
+const exactFallbackSearch = new UltraSearch(exactFallbackGame, () => 0, {
+  ...TEST_PROFILE,
+  maxDepth: 1,
+  rootLimit: 4,
+});
+exactFallbackSearch.opponentCanClaimDedicatedLaser = () => false;
+const exactFallbackState = exactFallbackGame.initialState();
+const exactFallbackResult = exactFallbackSearch.choose(exactFallbackState);
+assert.ok(
+  exactFallbackResult.move
+    && exactFallbackGame.isLegalMove(exactFallbackState, exactFallbackResult.move),
+  "Ultra must retain an exact legal fallback when bounded witnesses find no move.",
 );
 
 console.log(

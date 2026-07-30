@@ -13,6 +13,67 @@ versions.
 
 No unreleased changes.
 
+## v0.13.4 - 2026-07-30
+
+### Ultra AI
+
+- Added permanent laser assignment to the strategic evaluation. A laser that
+  can reach only the opposing king is now worth `+1200`; one permanently
+  committed to Ultra's own king is worth `-1200`.
+- Added a root safety pass that rejects moves allowing the opponent to claim a
+  permanent assignment when a safe alternative exists. This fixes the reported
+  26-ply loss at its real turning point, move 16, rather than treating the final
+  king hit as the mistake.
+- Exact legality now confirms concrete assignment threats and remains the final
+  emergency fallback when the bounded route witness finds no move.
+- Kept exact route validation for concrete tactical candidates and
+  only-surviving defenses, while speculative leaf scoring now relies on sound
+  constructive route witnesses. It no longer starts an uninterruptible exact
+  route proof from every speculative leaf.
+- Added iteration-cost prediction before deeper searches. On the reported
+  position Ultra now completes depth 4 and selects a safe move in about three
+  seconds instead of entering a depth-5 iteration that reached the 11-second
+  browser watchdog.
+
+### Arena and tests
+
+- Isolated each difficulty in its own arena process and split Ultra matches
+  into bounded concurrent chunks. Missing or malformed child results now fail
+  the run, preventing a long legacy route-solver process from silently omitting
+  Ultra while the overall gate appears to pass.
+- Preserved the global seeded-opening sequence across chunks, failed candidate
+  moves that exceed the production 11-second watchdog, and added a hard
+  two-minute process timeout so a stuck solver cannot hang the pipeline.
+- Added the reported loss as a deterministic fixture. The test proves that the
+  logged move concedes a permanent assignment and that Ultra's replacement
+  move does not.
+- Passed all 12 automated test suites, the 307-ply tactical corpus, route-solver
+  regressions, fixed-depth speed non-regression, the staged Pages artifact
+  check, and the full four-difficulty arena.
+
+#### Arena strength
+
+Measured against `v0.13.3` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair). Intervals are 95% paired-bootstrap
+confidence intervals. These are relative Elo changes, not absolute ratings.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 30-4-30 | 0 | 0 to 0 |
+| Medium | 30-4-30 | 0 | 0 to 0 |
+| Hard | 30-4-30 | 0 | 0 to 0 |
+| Ultra | 31-3-30 | +5 | -49 to +60 |
+
+Ultra averaged 19.7 ms per move versus 20.7 ms for `v0.13.3` under the arena's
+deterministic computation budget.
+
+### Documentation
+
+- Added a maintained LaTeX and PDF reference for the pure evaluation logic,
+  including every term, weight, sign convention, and a worked example.
+- Added a release test that requires the document's version and weights to
+  match the game, and included the PDF in the deployed Pages artifact.
+
 ## v0.13.3 - 2026-07-29
 
 ### Presentation

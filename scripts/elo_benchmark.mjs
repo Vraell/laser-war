@@ -1,14 +1,17 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { Game } from "../web/engine.js";
 import { passesArenaGate, summarizePairs } from "./arena_stats.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const difficulties = ["easy", "medium", "hard", "ultra"];
+const childMode = process.env.LASER_WAR_ARENA_CHILD === "1";
+const MOVE_WALL_TIMEOUT_MS = 11_000;
+const CHILD_WALL_TIMEOUT_MS = 120_000;
+let Game;
 
 /** Parse the intentionally small command-line surface for arena runs. */
 function parseArguments(argv) {
@@ -19,6 +22,7 @@ function parseArguments(argv) {
     difficulties,
     openingPlies: [0, 2, 4, 6, 8, 10],
     seedOffset: 0,
+    pairOffset: 0,
     ultraTime: 300,
     gate: "nonregression",
     verbose: false,
@@ -33,6 +37,7 @@ function parseArguments(argv) {
       options.openingPlies = argv[++index].split(",").map(Number);
     }
     else if (argument === "--seed-offset") options.seedOffset = Number(argv[++index]);
+    else if (argument === "--pair-offset") options.pairOffset = Number(argv[++index]);
     else if (argument === "--ultra-time") options.ultraTime = Number(argv[++index]);
     else if (argument === "--gate") options.gate = argv[++index];
     else if (argument === "--verbose") options.verbose = true;
@@ -53,6 +58,9 @@ function parseArguments(argv) {
     throw new Error("--opening-plies must be comma-separated non-negative integers.");
   }
   if (!Number.isInteger(options.seedOffset)) throw new Error("--seed-offset must be an integer.");
+  if (!Number.isInteger(options.pairOffset) || options.pairOffset < 0) {
+    throw new Error("--pair-offset must be a non-negative integer.");
+  }
   if (!Number.isFinite(options.ultraTime) || options.ultraTime < 50) {
     throw new Error("--ultra-time must be at least 50 milliseconds.");
   }
@@ -60,6 +68,49 @@ function parseArguments(argv) {
     throw new Error("--gate must be off, nonregression, or improvement.");
   }
   return options;
+}
+
+/** Serialize parsed options for one isolated difficulty process. */
+function isolatedArguments(options, difficulty, pairs = options.pairs, pairOffset = 0) {
+  const argumentsList = [
+    import.meta.filename,
+    "--pairs", String(pairs),
+    "--max-plies", String(options.maxPlies),
+    "--baseline-ref", options.baselineRef,
+    "--difficulties", difficulty,
+    "--opening-plies", options.openingPlies.join(","),
+    "--seed-offset", String(options.seedOffset),
+    "--pair-offset", String(pairOffset),
+    "--ultra-time", String(options.ultraTime),
+    "--gate", "off",
+  ];
+  if (options.verbose) argumentsList.push("--verbose");
+  return argumentsList;
+}
+
+/** Run one arena child and capture its structured stdout without sharing SAT memory. */
+function runArenaChild(argumentsList) {
+  return new Promise((resolveChild, rejectChild) => {
+    execFile(
+      process.execPath,
+      argumentsList,
+      {
+        cwd: projectRoot,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: CHILD_WALL_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+        env: { ...process.env, LASER_WAR_ARENA_CHILD: "1" },
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          rejectChild(new Error(stderr.trim() || error.message));
+          return;
+        }
+        resolveChild(stdout);
+      },
+    );
+  });
 }
 
 /** Return a deterministic random source so paired games share the same noise. */
@@ -182,6 +233,16 @@ function playGame({
     telemetry[owner].nodes += result.nodes || 0;
     telemetry[owner].wallMilliseconds += result.wallMilliseconds;
     telemetry[owner].moves += 1;
+    if (result.wallMilliseconds > MOVE_WALL_TIMEOUT_MS) {
+      return {
+        score: owner === "candidate" ? 0 : 1,
+        illegal: null,
+        timeout: owner,
+        error: `Move exceeded ${MOVE_WALL_TIMEOUT_MS} ms.`,
+        telemetry,
+        moves,
+      };
+    }
     if (!result.move || !game.isLegalMove(state, result.move)) {
       return {
         score: owner === "candidate" ? 0 : 1,
@@ -242,9 +303,10 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
     baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
   };
   for (let pair = 0; pair < options.pairs; pair += 1) {
+    const globalPair = options.pairOffset + pair;
     const opening = openingState(
-      0xa11ce + options.seedOffset + pair * 7919,
-      options.openingPlies[pair % options.openingPlies.length],
+      0xa11ce + options.seedOffset + globalPair * 7919,
+      options.openingPlies[globalPair % options.openingPlies.length],
     );
     let pairScore = 0;
     for (const candidateSide of ["top", "bottom"]) {
@@ -254,19 +316,19 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
         difficulty,
         candidateSide,
         opening,
-        seed: 0xc0ffee + options.seedOffset + pair * 104729,
+        seed: 0xc0ffee + options.seedOffset + globalPair * 104729,
         maxPlies: options.maxPlies,
       });
       results.push(result);
       pairScore += result.score;
       addTelemetry(telemetry, result);
-      if (options.verbose) {
+      if (options.verbose && !childMode) {
         const outcome = result.score === 1 ? "win" : result.score === 0 ? "loss" : "draw";
         const line = result.moves.map(({ owner, move, depth }) => (
           `${owner === "candidate" ? "C" : "B"}:${move.mirror}R${move.row + 1}C${move.col + 1}@${depth}`
         )).join(" ");
         console.log(
-          `  pair ${pair + 1} · candidate ${candidateSide} · ${outcome}`
+          `  pair ${globalPair + 1} · candidate ${candidateSide} · ${outcome}`
           + `${result.error ? ` · error: ${result.error}` : ""} · ${line}`,
         );
       }
@@ -281,62 +343,189 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
   const draws = results.filter((result) => result.score === 0.5).length;
   const losses = games - wins - draws;
   const illegal = results.filter((result) => result.illegal).length;
+  const timeouts = {
+    candidate: results.filter((result) => result.timeout === "candidate").length,
+    baseline: results.filter((result) => result.timeout === "baseline").length,
+  };
   const candidateSpeed = telemetry.candidate.wallMilliseconds / Math.max(1, telemetry.candidate.moves);
   const baselineSpeed = telemetry.baseline.wallMilliseconds / Math.max(1, telemetry.baseline.moves);
-  console.log(
-    `${difficulty.padEnd(6)} ${wins}-${draws}-${losses} · `
-    + `${Math.round(summary.elo) >= 0 ? "+" : ""}${Math.round(summary.elo)} Elo `
-    + `[${Math.round(summary.lowElo)}, ${Math.round(summary.highElo)}] · `
-    + `Ptnml ${summary.pentanomial.join("-")} · `
-    + `${candidateSpeed.toFixed(1)} vs ${baselineSpeed.toFixed(1)} ms/move`,
-  );
-  return { difficulty, score, games, illegal, pairScores, summary };
+  if (!childMode) {
+    console.log(
+      `${difficulty.padEnd(6)} ${wins}-${draws}-${losses} · `
+      + `${Math.round(summary.elo) >= 0 ? "+" : ""}${Math.round(summary.elo)} Elo `
+      + `[${Math.round(summary.lowElo)}, ${Math.round(summary.highElo)}] · `
+      + `Ptnml ${summary.pentanomial.join("-")} · `
+      + `${candidateSpeed.toFixed(1)} vs ${baselineSpeed.toFixed(1)} ms/move`,
+    );
+  }
+  return {
+    difficulty,
+    score,
+    games,
+    wins,
+    draws,
+    losses,
+    illegal,
+    timeouts,
+    pairScores,
+    summary,
+    telemetry,
+  };
 }
 
 const options = parseArguments(process.argv.slice(2));
-const candidateSource = readFileSync(join(projectRoot, "web", "ai.js"), "utf8");
-const baselineSource = execFileSync(
-  "git",
-  ["show", `${options.baselineRef}:web/ai.js`],
-  { cwd: projectRoot, encoding: "utf8" },
-);
-const [candidate, baseline] = await Promise.all([
-  loadAiRevision("candidate", candidateSource, options.ultraTime),
-  loadAiRevision("baseline", baselineSource, options.ultraTime),
-]);
-
-console.log(
-  `AI arena · candidate working tree vs ${options.baselineRef} · `
-  + `${options.pairs * 2} games per difficulty`,
-);
-const assessments = options.difficulties.map(
-  (difficulty) => assessDifficulty(candidate, baseline, difficulty, options),
-);
-const totalScore = assessments.reduce((total, result) => total + result.score, 0);
-const totalGames = assessments.reduce((total, result) => total + result.games, 0);
-const aggregate = summarizePairs(assessments.flatMap((result) => result.pairScores));
-const illegalMoves = assessments.reduce((total, result) => total + result.illegal, 0);
-console.log(
-  `overall ${totalScore.toFixed(1)}/${totalGames} · `
-  + `${Math.round(eloFromScore(totalScore / totalGames)) >= 0 ? "+" : ""}`
-  + `${Math.round(eloFromScore(totalScore / totalGames))} Elo`,
-);
-
-if (illegalMoves) {
-  throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
-}
-if (options.gate !== "off") {
-  const failed = assessments.filter(
-    ({ summary }) => !passesArenaGate(summary, options.gate),
+if (options.difficulties.length > 1) {
+  console.log(
+    `AI arena · isolated difficulty processes · ${options.pairs * 2} games per difficulty`,
   );
-  if (failed.length || !passesArenaGate(aggregate, options.gate)) {
-    const details = failed.map(({ difficulty, summary }) => (
-      `${difficulty} ${(summary.scoreRate * 100).toFixed(1)}% `
-      + `[${(summary.low * 100).toFixed(1)}–${(summary.high * 100).toFixed(1)}%]`
-    )).join(", ");
-    throw new Error(
-      `Candidate failed the ${options.gate} gate`
-      + `${details ? `: ${details}` : " on the aggregate result"}.`,
+  const assessments = [];
+  for (const difficulty of options.difficulties) {
+    const chunkSize = difficulty === "ultra" ? Math.min(8, options.pairs) : options.pairs;
+    const chunks = [];
+    const childArguments = [];
+    for (let start = 0; start < options.pairs; start += chunkSize) {
+      const pairs = Math.min(chunkSize, options.pairs - start);
+      childArguments.push(isolatedArguments(options, difficulty, pairs, start));
+    }
+    const outputs = difficulty === "ultra"
+      ? await Promise.all(childArguments.map(runArenaChild))
+      : childArguments.map((argumentsList) => execFileSync(
+        process.execPath,
+        argumentsList,
+        {
+          cwd: projectRoot,
+          encoding: "utf8",
+          maxBuffer: 64 * 1024 * 1024,
+          timeout: CHILD_WALL_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          env: { ...process.env, LASER_WAR_ARENA_CHILD: "1" },
+        },
+      ));
+    for (const output of outputs) {
+      const resultLine = output.split("\n").find((line) => line.startsWith("ARENA_RESULT "));
+      if (!resultLine) throw new Error(`${difficulty} arena child returned no result.`);
+      chunks.push(JSON.parse(resultLine.slice("ARENA_RESULT ".length)));
+    }
+    const pairScores = chunks.flatMap((chunk) => chunk.pairScores);
+    const telemetry = {
+      candidate: { nodes: 0, wallMilliseconds: 0, moves: 0 },
+      baseline: { nodes: 0, wallMilliseconds: 0, moves: 0 },
+    };
+    for (const chunk of chunks) {
+      for (const owner of ["candidate", "baseline"]) {
+        for (const field of ["nodes", "wallMilliseconds", "moves"]) {
+          telemetry[owner][field] += chunk.telemetry[owner][field];
+        }
+      }
+    }
+    const summary = summarizePairs(pairScores);
+    const games = pairScores.length * 2;
+    const score = pairScores.reduce((total, pairScore) => total + pairScore, 0);
+    const wins = chunks.reduce((total, chunk) => total + chunk.wins, 0);
+    const draws = chunks.reduce((total, chunk) => total + chunk.draws, 0);
+    const losses = games - wins - draws;
+    const candidateSpeed = telemetry.candidate.wallMilliseconds / Math.max(1, telemetry.candidate.moves);
+    const baselineSpeed = telemetry.baseline.wallMilliseconds / Math.max(1, telemetry.baseline.moves);
+    console.log(
+      `${difficulty.padEnd(6)} ${wins}-${draws}-${losses} · `
+      + `${Math.round(summary.elo) >= 0 ? "+" : ""}${Math.round(summary.elo)} Elo `
+      + `[${Math.round(summary.lowElo)}, ${Math.round(summary.highElo)}] · `
+      + `Ptnml ${summary.pentanomial.join("-")} · `
+      + `${candidateSpeed.toFixed(1)} vs ${baselineSpeed.toFixed(1)} ms/move`,
     );
+    assessments.push({
+      difficulty,
+      score,
+      games,
+      illegal: chunks.reduce((total, chunk) => total + chunk.illegal, 0),
+      candidateTimeouts: chunks.reduce(
+        (total, chunk) => total + chunk.timeouts.candidate,
+        0,
+      ),
+      pairScores,
+      summary,
+    });
+  }
+  const aggregate = summarizePairs(assessments.flatMap(({ pairScores }) => pairScores));
+  const illegalMoves = assessments.reduce((total, assessment) => total + assessment.illegal, 0);
+  if (illegalMoves) throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
+  const candidateTimeouts = assessments.reduce(
+    (total, assessment) => total + assessment.candidateTimeouts,
+    0,
+  );
+  if (candidateTimeouts) {
+    throw new Error(`Candidate exceeded the production move limit ${candidateTimeouts} time(s).`);
+  }
+  if (options.gate !== "off") {
+    const failed = assessments.filter(
+      ({ summary }) => !passesArenaGate(summary, options.gate),
+    );
+    if (failed.length || !passesArenaGate(aggregate, options.gate)) {
+      throw new Error(`Candidate failed the ${options.gate} gate.`);
+    }
+  }
+} else {
+  ({ Game } = await import("../web/engine.js"));
+  const candidateSource = readFileSync(join(projectRoot, "web", "ai.js"), "utf8");
+  const baselineSource = execFileSync(
+    "git",
+    ["show", `${options.baselineRef}:web/ai.js`],
+    { cwd: projectRoot, encoding: "utf8" },
+  );
+  const [candidate, baseline] = await Promise.all([
+    loadAiRevision("candidate", candidateSource, options.ultraTime),
+    loadAiRevision("baseline", baselineSource, options.ultraTime),
+  ]);
+
+  if (!childMode) {
+    console.log(
+      `AI arena · candidate working tree vs ${options.baselineRef} · `
+      + `${options.pairs * 2} games per difficulty`,
+    );
+  }
+  const assessments = options.difficulties.map(
+    (difficulty) => assessDifficulty(candidate, baseline, difficulty, options),
+  );
+  const totalScore = assessments.reduce((total, result) => total + result.score, 0);
+  const totalGames = assessments.reduce((total, result) => total + result.games, 0);
+  const aggregate = summarizePairs(assessments.flatMap((result) => result.pairScores));
+  const illegalMoves = assessments.reduce((total, result) => total + result.illegal, 0);
+  const candidateTimeouts = assessments.reduce(
+    (total, result) => total + result.timeouts.candidate,
+    0,
+  );
+  if (childMode) {
+    const assessment = assessments[0];
+    console.log(`ARENA_RESULT ${JSON.stringify({
+      ...assessment,
+    })}`);
+  } else {
+    console.log(
+      `overall ${totalScore.toFixed(1)}/${totalGames} · `
+      + `${Math.round(eloFromScore(totalScore / totalGames)) >= 0 ? "+" : ""}`
+      + `${Math.round(eloFromScore(totalScore / totalGames))} Elo`,
+    );
+  }
+
+  if (illegalMoves) {
+    throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
+  }
+  if (candidateTimeouts) {
+    throw new Error(`Candidate exceeded the production move limit ${candidateTimeouts} time(s).`);
+  }
+  if (options.gate !== "off") {
+    const failed = assessments.filter(
+      ({ summary }) => !passesArenaGate(summary, options.gate),
+    );
+    if (failed.length || !passesArenaGate(aggregate, options.gate)) {
+      const details = failed.map(({ difficulty, summary }) => (
+        `${difficulty} ${(summary.scoreRate * 100).toFixed(1)}% `
+        + `[${(summary.low * 100).toFixed(1)}–${(summary.high * 100).toFixed(1)}%]`
+      )).join(", ");
+      throw new Error(
+        `Candidate failed the ${options.gate} gate`
+        + `${details ? `: ${details}` : " on the aggregate result"}.`,
+      );
+    }
   }
 }

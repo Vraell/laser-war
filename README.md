@@ -34,9 +34,16 @@ During quiet openings, Ultra varies its play only among moves tied at the deepes
 provides different games without knowingly selecting a lower-evaluated move.
 
 The static evaluation is intentionally small and auditable. It scores remaining king cover, shield shape,
-independent laser reachability, exact per-laser route costs, and current king exposure. A simultaneous exposure
-is neutral because both lasers fire together. Extra fixed-target and broad root heuristics were tested and
-rejected when paired games showed that they duplicated route pressure or reduced playing strength.
+independent laser reachability, permanent one-king laser assignments, exact per-laser route costs, and current
+king exposure. A simultaneous exposure is neutral because both lasers fire together. Ultra also rejects root
+moves that let the opponent claim a permanent laser assignment when a safe alternative exists.
+
+## Evaluation Reference
+
+The complete evaluation is documented as pure game logic, with every term, sign convention, weight, and a
+worked numerical example: [LaTeX source](docs/ULTRA_EVALUATION.tex) and
+[PDF](docs/ULTRA_EVALUATION.pdf). The release tests compare the document's version and weights with the game,
+so either must be updated whenever the evaluation changes.
 
 ## Release History
 
@@ -73,9 +80,12 @@ node scripts/elo_benchmark.mjs \
 The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
 results, estimated Elo with a paired bootstrap 95% interval, illegal moves, and average search time. Search
 errors count as losses instead of aborting the evidence run. Each AI receives the real Red or Blue state without
-perspective normalization, so side-specific objective errors are exercised in the arena. Ultra receives a
-deterministic virtual computation budget, so machine load cannot change the completed search depth; real wall
-time is still reported separately.
+perspective normalization, so side-specific objective errors are exercised in the arena. Difficulties run in
+isolated child processes, and Ultra's pairs are split into bounded chunks; every required result must return
+before the gate can pass. Candidate moves exceeding the production 11-second watchdog fail, and a hard process
+timeout prevents a stuck solver from blocking the pipeline indefinitely. Ultra receives a deterministic virtual
+computation budget, so machine load cannot change the completed search depth; real wall time is checked
+separately.
 The Pages workflow gates every deployment on unit tests, the tactical corpus, search-speed non-regression, and
 32 paired games at each difficulty. Every difficulty and the aggregate result must pass independently. Reported
 failures should also become fixtures in `web/fixtures/`; deterministic tactical tests and statistical match

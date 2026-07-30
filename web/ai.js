@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.3";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.3";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.4";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.4";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -9,6 +9,21 @@ const ULTRA_PROFILE = {
   proofMaxNodes: 0,
 };
 const MATE_SCORE = 10_000;
+export const EVALUATION_WEIGHTS = Object.freeze({
+  mate: MATE_SCORE,
+  shieldCount: 25,
+  shieldNear: 18,
+  shieldFar: 6,
+  reachability: 18,
+  assignment: 1_200,
+  exposure: 540,
+  routeLimit: 12,
+  routeRaceLinear: 67,
+  routeReserveLinear: 42,
+  routeRaceQuadratic: 28,
+  routeReserveQuadratic: 18,
+  routePerLaserQuadratic: 8,
+});
 
 class SearchInterrupted extends Error {}
 
@@ -25,7 +40,10 @@ function signedSquare(value) {
 }
 
 function boundedRouteCost(costs, player) {
-  return Math.min(costs[player] ?? 12, 12);
+  return Math.min(
+    costs[player] ?? EVALUATION_WEIGHTS.routeLimit,
+    EVALUATION_WEIGHTS.routeLimit,
+  );
 }
 
 /** Score attack tempo and per-laser control from one player's perspective. */
@@ -41,11 +59,14 @@ export function routePressureScore(routeCosts, own, opponent) {
   const controlGaps = routeCosts.map(
     (costs) => boundedRouteCost(costs, own) - boundedRouteCost(costs, opponent),
   );
-  return raceGap * 67
-    + reserveGap * 42
-    + signedSquare(raceGap) * 28
-    + signedSquare(reserveGap) * 18
-    + controlGaps.reduce((total, gap) => total + signedSquare(gap), 0) * 8;
+  return raceGap * EVALUATION_WEIGHTS.routeRaceLinear
+    + reserveGap * EVALUATION_WEIGHTS.routeReserveLinear
+    + signedSquare(raceGap) * EVALUATION_WEIGHTS.routeRaceQuadratic
+    + signedSquare(reserveGap) * EVALUATION_WEIGHTS.routeReserveQuadratic
+    + controlGaps.reduce(
+      (total, gap) => total + signedSquare(gap),
+      0,
+    ) * EVALUATION_WEIGHTS.routePerLaserQuadratic;
 }
 
 /** Choose an Easy, Medium, or Hard move with bounded tactical reply analysis. */
@@ -183,6 +204,7 @@ export class UltraSearch {
     this.forcingCache = new Map();
     this.forcedExposureCache = new Map();
     this.rootSurvivalCache = new Map();
+    this.assignmentThreatCache = new Map();
     this.stateKeys = new WeakMap();
     this.shieldMetricsCache = new WeakMap();
     this.bestCompleted = null;
@@ -206,6 +228,7 @@ export class UltraSearch {
     this.forcingCache.clear();
     this.forcedExposureCache.clear();
     this.rootSurvivalCache.clear();
+    this.assignmentThreatCache.clear();
     this.stateKeys = new WeakMap();
     this.shieldMetricsCache = new WeakMap();
     this.bestCompleted = null;
@@ -272,6 +295,19 @@ export class UltraSearch {
     const orderedFallback = this.orderedChildren(state, 0);
     const fallback = orderedFallback.find(
       ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
+        && !this.opponentCanClaimDedicatedLaser(child)
+        && this.strictChild(state, move, child, false),
+    ) || orderedFallback.find(
+      ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
+        && this.strictChild(state, move, child, false),
+    ) || orderedFallback.find(
+      ({ move, state: child }) => this.strictChild(state, move, child, false),
+    ) || orderedFallback.find(
+      ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
+        && !this.opponentCanClaimDedicatedLaser(child)
+        && this.strictChild(state, move, child),
+    ) || orderedFallback.find(
+      ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
         && this.strictChild(state, move, child),
     ) || orderedFallback.find(
       ({ move, state: child }) => this.strictChild(state, move, child),
@@ -329,11 +365,12 @@ export class UltraSearch {
         this.reportProgress("searching", true);
         const now = this.now();
         const iterationElapsed = now - iterationStarted;
+        const nextIterationEstimate = iterationElapsed * (depth >= 4 ? 3 : 1.8);
+        const iterationDeadline = useHardDeadline ? configuredDeadline : timing.softDeadline;
         if (Math.abs(bestScore) >= MATE_SCORE - 100) break;
-        if (!useHardDeadline && depth >= 3 && (
-          now >= timing.softDeadline
-          || (!timing.latePosition
-            && now + Math.max(50, iterationElapsed * 1.8) >= timing.softDeadline)
+        if (depth >= 3 && (
+          now >= iterationDeadline
+          || now + Math.max(50, nextIterationEstimate) >= iterationDeadline
         )) break;
       } catch (error) {
         if (!(error instanceof SearchInterrupted)) throw error;
@@ -466,7 +503,27 @@ export class UltraSearch {
         : safeRanked;
     for (const candidate of candidates) {
       this.checkInterrupted();
+      if (this.opponentCanClaimDedicatedLaser(candidate.state)) continue;
+      if (this.strictChild(state, candidate.move, candidate.state, false)
+        || this.strictChild(state, candidate.move, candidate.state)) {
+        return { move: candidate.move, score: candidate.score };
+      }
+    }
+    for (const candidate of candidates) {
+      this.checkInterrupted();
+      if (this.strictChild(state, candidate.move, candidate.state, false)) {
+        return { move: candidate.move, score: candidate.score };
+      }
+    }
+    for (const candidate of candidates) {
+      this.checkInterrupted();
       if (this.strictChild(state, candidate.move, candidate.state)) {
+        return { move: candidate.move, score: candidate.score };
+      }
+    }
+    for (const candidate of ranked) {
+      this.checkInterrupted();
+      if (this.strictChild(state, candidate.move, candidate.state, false)) {
         return { move: candidate.move, score: candidate.score };
       }
     }
@@ -491,10 +548,27 @@ export class UltraSearch {
     const opponent = state.turn;
     const canWin = this.game.legalChildren(state, false).some(({ move, state: child }) => {
       this.checkInterrupted();
-      return child.winner === opponent && this.game.isLegalMove(state, move);
+      if (child.winner !== opponent) return false;
+      return this.strictChild(state, move, child, false)
+        || this.strictChild(state, move, child);
     });
     this.rootSurvivalCache.set(key, canWin);
     return canWin;
+  }
+
+  /** Detect whether the opponent can permanently dedicate one laser to this side's king. */
+  opponentCanClaimDedicatedLaser(state) {
+    const key = this.keyForState(state);
+    if (this.assignmentThreatCache.has(key)) return this.assignmentThreatCache.get(key);
+    const targetMask = state.turn === "top" ? 2 : 1;
+    const canClaim = this.game.legalChildren(state, false).some(({ move, state: child }) => {
+      this.checkInterrupted();
+      if (!this.game.reachableKingMasksByLaser(child.board).includes(targetMask)) return false;
+      return this.strictChild(state, move, child, false)
+        || this.strictChild(state, move, child);
+    });
+    this.assignmentThreatCache.set(key, canClaim);
+    return canClaim;
   }
 
   /** Evaluate a subtree with selective alpha-beta negamax. */
@@ -506,7 +580,7 @@ export class UltraSearch {
       return score > 0 ? score - ply : score + ply;
     }
     if (state.draw) return 0;
-    if (depth <= 0) return this.stabilizedEvaluation(state, ply);
+    if (depth <= 0) return this.stabilizedEvaluation(state, ply, false);
 
     const originalAlpha = alpha;
     const originalBeta = beta;
@@ -612,9 +686,15 @@ export class UltraSearch {
       return legal ? fastChild : null;
     }
     try {
-      const child = this.game.resolveMove(state, move, false).state;
-      legality.set(keyForMove, true);
-      return child;
+      if (allowExact) {
+        const child = this.game.resolveMove(state, move, false).state;
+        legality.set(keyForMove, true);
+        return child;
+      }
+      const child = this.game.resolveMove(state, move, false, false).state;
+      const legal = this.game.jointPathPreservedFast(state.board, child.board, move);
+      legality.set(keyForMove, legal);
+      return legal ? child : null;
     } catch {
       legality.set(keyForMove, false);
       return null;
@@ -668,22 +748,22 @@ export class UltraSearch {
     }
     const ownMask = own === "top" ? 1 : 2;
     const opponentMask = opponent === "top" ? 1 : 2;
-    return (shields[own].count - shields[opponent].count) * 25
+    return (shields[own].count - shields[opponent].count) * EVALUATION_WEIGHTS.shieldCount
       + (hitMask & opponentMask ? 300 : 0)
       - (hitMask & ownMask ? 300 : 0);
   }
 
   /** Extend exposed-king horizons through all legal tactical evasions. */
-  stabilizedEvaluation(state, ply) {
+  stabilizedEvaluation(state, ply, allowExact = true) {
     if (!this.game.fireLasers(state.board).some((beam) => beam.hitKing)) {
-      const forcingScore = this.forcingSetupScore(state, ply);
+      const forcingScore = this.forcingSetupScore(state, ply, allowExact);
       return forcingScore ?? this.strategicEvaluation(state);
     }
 
     const opponent = state.turn === "top" ? "bottom" : "top";
     const apparentSurvivals = this.orderedChildren(state, ply)
       .filter(({ state: child }) => child.winner !== opponent);
-    const children = this.strictSubset(state, apparentSurvivals, 8, true);
+    const children = this.strictSubset(state, apparentSurvivals, 8, allowExact);
     let best = -Infinity;
     for (const { state: child } of children) {
       this.checkInterrupted();
@@ -692,12 +772,13 @@ export class UltraSearch {
       const candidate = child.draw ? 0 : -this.strategicEvaluation(child);
       best = Math.max(best, candidate);
     }
-    return best === -Infinity ? -MATE_SCORE + (ply + 1) : best;
+    if (best !== -Infinity) return best;
+    return allowExact ? -MATE_SCORE + (ply + 1) : this.strategicEvaluation(state);
   }
 
   /** Detect a legal setup that leaves the opposing king without an escape. */
-  forcingSetupScore(state, ply) {
-    const key = this.keyForState(state);
+  forcingSetupScore(state, ply, allowExact = true) {
+    const key = `${allowExact ? "exact" : "fast"}|${this.keyForState(state)}`;
     if (this.forcingCache.has(key)) {
       const distance = this.forcingCache.get(key);
       return distance === null ? null : MATE_SCORE - (ply + distance);
@@ -712,7 +793,7 @@ export class UltraSearch {
       const beams = this.game.fireLasers(placed);
       const hitKings = new Set(beams.map((beam) => beam.hitKing).filter(Boolean));
       if (hitKings.has(opponent)) {
-        const child = this.strictChild(state, move);
+        const child = this.strictChild(state, move, null, allowExact);
         if (child?.winner === own) {
           this.forcingCache.set(key, 1);
           return MATE_SCORE - (ply + 1);
@@ -724,9 +805,9 @@ export class UltraSearch {
       const damaged = placed.map((row) => [...row]);
       for (const [row, col] of destroyed) damaged[row][col] = Cell.EMPTY;
       if (!this.game.fireLasers(damaged).some((beam) => beam.hitKing === opponent)) continue;
-      const child = this.strictChild(state, move);
+      const child = this.strictChild(state, move, null, allowExact);
       if (!child || child.winner || child.draw) continue;
-      if (this.isForcedExposure(child)) {
+      if (this.isForcedExposure(child, allowExact)) {
         this.forcingCache.set(key, 2);
         return MATE_SCORE - (ply + 2);
       }
@@ -736,8 +817,8 @@ export class UltraSearch {
   }
 
   /** Return whether the side to move has no legal way to survive an exposed king. */
-  isForcedExposure(state) {
-    const key = this.keyForState(state);
+  isForcedExposure(state, allowExact = true) {
+    const key = `${allowExact ? "exact" : "fast"}|${this.keyForState(state)}`;
     if (this.forcedExposureCache.has(key)) return this.forcedExposureCache.get(key);
 
     const defender = state.turn;
@@ -756,10 +837,11 @@ export class UltraSearch {
         continue;
       }
       if (child.winner === attacker) continue;
-      if (this.strictChild(state, move, child)) {
+      if (this.strictChild(state, move, child, allowExact)) {
         this.forcedExposureCache.set(key, false);
         return false;
       }
+      if (!allowExact) return false;
     }
     this.forcedExposureCache.set(key, true);
     return true;
@@ -802,6 +884,7 @@ export class UltraSearch {
         shieldCount: 0,
         shieldShape: 0,
         reachability: 0,
+        assignmentControl: 0,
         routeControl: 0,
         exposure: 0,
       };
@@ -809,7 +892,7 @@ export class UltraSearch {
     const shieldMetrics = this.shieldMetrics(state.board);
     const shieldCount = (
       shieldMetrics[own].count - shieldMetrics[opponent].count
-    ) * 25;
+    ) * EVALUATION_WEIGHTS.shieldCount;
     const shieldShape = shieldMetrics[own].shape - shieldMetrics[opponent].shape;
 
     const reachable = this.game.reachableKingMasksByLaser(state.board);
@@ -821,7 +904,12 @@ export class UltraSearch {
       if (mask & attackMask) attackRoutes += 1;
       if (mask & exposedMask) exposedRoutes += 1;
     }
-    const reachability = (attackRoutes - exposedRoutes) * 18;
+    const reachability = (
+      attackRoutes - exposedRoutes
+    ) * EVALUATION_WEIGHTS.reachability;
+    const assignmentControl = (
+      this.assignmentControl(state) * EVALUATION_WEIGHTS.assignment
+    );
 
     const routeCosts = this.game.routeCostsByLaser(state.board);
     const routeControl = routePressureScore(routeCosts, own, opponent);
@@ -831,16 +919,29 @@ export class UltraSearch {
       if (beam.hitKing === "top") hitMask |= 1;
       else if (beam.hitKing === "bottom") hitMask |= 2;
     }
-    const exposure = (hitMask & attackMask ? 540 : 0)
-      - (hitMask & exposedMask ? 540 : 0);
+    const exposure = (hitMask & attackMask ? EVALUATION_WEIGHTS.exposure : 0)
+      - (hitMask & exposedMask ? EVALUATION_WEIGHTS.exposure : 0);
     return {
       terminal,
       shieldCount,
       shieldShape,
       reachability,
+      assignmentControl,
       routeControl,
       exposure,
     };
+  }
+
+  /** Score permanent one-king laser assignments from a chosen side's perspective. */
+  assignmentControl(state, perspective = state.turn) {
+    const ownMask = perspective === "top" ? 1 : 2;
+    const opponentMask = perspective === "top" ? 2 : 1;
+    let control = 0;
+    for (const mask of this.game.reachableKingMasksByLaser(state.board)) {
+      if (mask === opponentMask) control += 1;
+      else if (mask === ownMask) control -= 1;
+    }
+    return control;
   }
 
   /** Prefer equal-scoring moves that damage opposing king cover over friendly cover. */
@@ -869,10 +970,10 @@ export class UltraSearch {
         const bottomDistance = Math.max(BOARD_SIZE - 1 - row, Math.abs(col - 4));
         if (topDistance <= 2) metrics.top.count += 1;
         if (bottomDistance <= 2) metrics.bottom.count += 1;
-        if (topDistance === 1) metrics.top.shape += 18;
-        else if (topDistance === 2) metrics.top.shape += 6;
-        if (bottomDistance === 1) metrics.bottom.shape += 18;
-        else if (bottomDistance === 2) metrics.bottom.shape += 6;
+        if (topDistance === 1) metrics.top.shape += EVALUATION_WEIGHTS.shieldNear;
+        else if (topDistance === 2) metrics.top.shape += EVALUATION_WEIGHTS.shieldFar;
+        if (bottomDistance === 1) metrics.bottom.shape += EVALUATION_WEIGHTS.shieldNear;
+        else if (bottomDistance === 2) metrics.bottom.shape += EVALUATION_WEIGHTS.shieldFar;
       }
     }
     this.shieldMetricsCache.set(board, metrics);
