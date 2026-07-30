@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.0";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.0";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.1";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.1";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -16,8 +16,8 @@ function moveKey(move) {
   return ((move.row * BOARD_SIZE + move.col) * 2) + Number(move.mirror === Cell.BACKSLASH);
 }
 
-function scoreForTop(game, state) {
-  return state.turn === "top" ? game.evaluate(state) : -game.evaluate(state);
+function scoreForPlayer(game, state, player) {
+  return state.turn === player ? game.evaluate(state) : -game.evaluate(state);
 }
 
 function signedSquare(value) {
@@ -51,11 +51,13 @@ export function routePressureScore(routeCosts, own, opponent) {
 /** Choose an Easy, Medium, or Hard move with bounded tactical reply analysis. */
 function standardMove(game, state, difficulty, random) {
   const started = performance.now();
+  const player = state.turn;
+  const opponent = player === "top" ? "bottom" : "top";
   const candidateLimit = difficulty === "hard" ? 24 : difficulty === "medium" ? 10 : 8;
   const approximate = game.legalChildren(state, false).map(({ move, state: child }) => ({
     move,
     state: child,
-    score: scoreForTop(game, child),
+    score: scoreForPlayer(game, child, player),
   })).sort((left, right) => right.score - left.score);
   const ranked = [];
   for (const candidate of approximate) {
@@ -75,7 +77,7 @@ function standardMove(game, state, difficulty, random) {
   const minimumCandidates = difficulty === "hard" ? 24 : 6;
   const analyzed = [];
   for (const candidate of ranked) {
-    if (candidate.state.winner === "top") {
+    if (candidate.state.winner === player) {
       return {
         move: candidate.move,
         score: 10000,
@@ -102,8 +104,8 @@ function standardMove(game, state, difficulty, random) {
       if (!game.isLegalMove(candidate.state, reply)) continue;
       legalReplies += 1;
       nodes += 1;
-      worstReply = Math.min(worstReply, scoreForTop(game, replyState));
-      if (replyState.winner === "bottom") {
+      worstReply = Math.min(worstReply, scoreForPlayer(game, replyState, player));
+      if (replyState.winner === opponent) {
         worstReply = -10000;
         complete = true;
         break;
@@ -138,7 +140,7 @@ function standardMove(game, state, difficulty, random) {
     for (const candidate of ranked.slice(0, 3)) {
       const opponentWins = game.legalChildren(candidate.state, false)
         .some(({ move: reply, state: replyState }) => (
-          replyState.winner === "bottom" && game.isLegalMove(candidate.state, reply)
+          replyState.winner === opponent && game.isLegalMove(candidate.state, reply)
         ));
       if (opponentWins) candidate.score = -10000;
     }
@@ -183,11 +185,15 @@ export class UltraSearch {
     this.rootSurvivalCache = new Map();
     this.stateKeys = new WeakMap();
     this.shieldMetricsCache = new WeakMap();
+    this.bestCompleted = null;
   }
 
   /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
     this.cache.clear();
+    this.bestCompleted = null;
+    this.activeDepth = 0;
+    this.nodes = 0;
     const started = this.now();
     this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
@@ -259,10 +265,18 @@ export class UltraSearch {
     };
     let bestMove = fallback.move;
     let bestScore = -this.strategicEvaluation(fallback.state);
-    let completedDepth = 1;
+    let completedDepth = 0;
     let previousIteration = null;
     let useHardDeadline = false;
     this.nodes = fastChildren.length + proof.nodes + children.length;
+    this.bestCompleted = {
+      move: bestMove,
+      score: bestScore,
+      depth: completedDepth,
+      nodes: this.nodes,
+      elapsed: this.now() - started,
+    };
+    this.reportProgress("searching", true);
     for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
       this.activeDepth = depth;
       this.reportProgress("searching", true);
@@ -276,6 +290,13 @@ export class UltraSearch {
         bestMove = result.move;
         bestScore = result.score;
         completedDepth = depth;
+        this.bestCompleted = {
+          move: bestMove,
+          score: bestScore,
+          depth: completedDepth,
+          nodes: this.nodes,
+          elapsed: this.now() - started,
+        };
         this.ordering.set(rootKey, moveKey(bestMove));
         if (depth >= 2 && this.shouldExtendSearch(
           previousIteration,
@@ -573,7 +594,7 @@ export class UltraSearch {
     try {
       const child = this.game.resolveMove(state, move, false).state;
       legality.set(keyForMove, true);
-      return fastChild || child;
+      return child;
     } catch {
       legality.set(keyForMove, false);
       return null;
@@ -863,6 +884,7 @@ export class UltraSearch {
       phase,
       depth: this.activeDepth,
       nodes: this.nodes,
+      best: this.bestCompleted,
     });
   }
 

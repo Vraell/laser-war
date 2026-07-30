@@ -110,25 +110,8 @@ async function loadAiRevision(label, source, ultraTime) {
   }
 }
 
-/** Swap player perspective by rotating the symmetric board and king ownership. */
-function stateFromTopPerspective(state) {
-  const swapCell = (cell) => (cell === "k" ? "K" : cell === "K" ? "k" : cell);
-  return {
-    board: [...state.board].reverse().map((row) => [...row].reverse().map(swapCell)),
-    turn: state.turn === "top" ? "bottom" : "top",
-    winner: state.winner ? (state.winner === "top" ? "bottom" : "top") : null,
-    draw: state.draw,
-  };
-}
-
-/** Rotate a move back from the normalized top-player perspective. */
-function rotateMove(move) {
-  return move ? { row: 8 - move.row, col: 8 - move.col, mirror: move.mirror } : null;
-}
-
 /** Ask one revision to move with deterministic clocks and randomness. */
 function chooseMove(revision, player, difficulty, game, state, random) {
-  const normalized = state.turn === "top" ? state : stateFromTopPerspective(state);
   let clock = 0;
   const clockTick = difficulty === "ultra" ? 0.1 : 5;
   globalThis.__laserWarArenaNow = () => {
@@ -137,14 +120,10 @@ function chooseMove(revision, player, difficulty, game, state, random) {
   };
   const started = process.hrtime.bigint();
   const result = player
-    ? player(normalized, difficulty, { random, now: globalThis.__laserWarArenaNow })
-    : revision.chooseComputerMove(game, normalized, difficulty, { random });
+    ? player(state, difficulty, { random, now: globalThis.__laserWarArenaNow })
+    : revision.chooseComputerMove(game, state, difficulty, { random });
   const elapsed = Number(process.hrtime.bigint() - started) / 1e6;
-  return {
-    ...result,
-    move: state.turn === "top" ? result.move : rotateMove(result.move),
-    wallMilliseconds: elapsed,
-  };
+  return { ...result, wallMilliseconds: elapsed };
 }
 
 /** Build one deterministic legal opening shared by both games in a pair. */
@@ -346,14 +325,18 @@ console.log(
 if (illegalMoves) {
   throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
 }
-if (options.gate === "nonregression" && !passesArenaGate(aggregate, options.gate)) {
-  throw new Error(
-    `Candidate failed non-regression: score ${(aggregate.scoreRate * 100).toFixed(1)}%, `
-    + `interval ${(aggregate.low * 100).toFixed(1)}–${(aggregate.high * 100).toFixed(1)}%.`,
+if (options.gate !== "off") {
+  const failed = assessments.filter(
+    ({ summary }) => !passesArenaGate(summary, options.gate),
   );
-}
-if (options.gate === "improvement" && !passesArenaGate(aggregate, options.gate)) {
-  throw new Error(
-    `Improvement is not established: lower bound ${(aggregate.low * 100).toFixed(1)}%.`,
-  );
+  if (failed.length || !passesArenaGate(aggregate, options.gate)) {
+    const details = failed.map(({ difficulty, summary }) => (
+      `${difficulty} ${(summary.scoreRate * 100).toFixed(1)}% `
+      + `[${(summary.low * 100).toFixed(1)}–${(summary.high * 100).toFixed(1)}%]`
+    )).join(", ");
+    throw new Error(
+      `Candidate failed the ${options.gate} gate`
+      + `${details ? `: ${details}` : " on the aggregate result"}.`,
+    );
+  }
 }

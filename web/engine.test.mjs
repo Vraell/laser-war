@@ -131,6 +131,31 @@ const correctedOutcome = game.resolveMove(selfKillState, correctedChoice.move, f
 assert.notDeepEqual(correctedChoice.move, selfKill);
 assert.notEqual(correctedOutcome.state.winner, "bottom");
 
+const swapKing = (cell) => (cell === Cell.TOP_KING
+  ? Cell.BOTTOM_KING
+  : cell === Cell.BOTTOM_KING ? Cell.TOP_KING : cell);
+const invertedSelfKillState = {
+  board: [...selfKillState.board].reverse().map(
+    (row) => [...row].reverse().map(swapKing),
+  ),
+  turn: "bottom",
+  winner: null,
+  draw: false,
+};
+const invertedSelfKill = { row: 8, col: 7, mirror: "/" };
+assert.equal(
+  game.resolveMove(invertedSelfKillState, invertedSelfKill, false).state.winner,
+  "top",
+);
+const invertedCorrectedChoice = chooseComputerMove(game, invertedSelfKillState, "hard");
+const invertedCorrectedOutcome = game.resolveMove(
+  invertedSelfKillState,
+  invertedCorrectedChoice.move,
+  false,
+);
+assert.notDeepEqual(invertedCorrectedChoice.move, invertedSelfKill);
+assert.notEqual(invertedCorrectedOutcome.state.winner, "top");
+
 const forcedLossFixture = JSON.parse(readFileSync(
   new URL("./fixtures/forced_loss_40_move_log.json", import.meta.url),
   "utf8",

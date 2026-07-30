@@ -1,19 +1,19 @@
-import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.13.0";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.13.1";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.13.0";
+} from "./save.js?v=0.13.1";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.13.0";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.13.0";
-import { beamPoints } from "./beam.js?v=0.13.0";
-import { drawDetailKey } from "./result.js?v=0.13.0";
+} from "./progress.js?v=0.13.1";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.13.1";
+import { beamPoints } from "./beam.js?v=0.13.1";
+import { drawDetailKey } from "./result.js?v=0.13.1";
 import {
   BLUE_SIDE,
   RED_SIDE,
@@ -21,11 +21,12 @@ import {
   logicalSquare,
   opposingSide,
   perspectiveLabels,
-} from "./perspective.js?v=0.13.0";
+} from "./perspective.js?v=0.13.1";
 
 const SAVE_KEY = "laser-war.web.v1";
-const GAME_VERSION = "v0.13.0";
+const GAME_VERSION = "v0.13.1";
 const BEAM_VISIBLE_MS = 920;
+const ULTRA_WATCHDOG_MS = 11_000;
 const game = new Game();
 
 const elements = {
@@ -68,7 +69,9 @@ let toastTimer = 0;
 let aiWorker = null;
 let aiRequestId = 0;
 let aiTimer = 0;
+let aiWatchdog = 0;
 let aiProgress = null;
+let aiFallbackResult = null;
 let aiStartedAt = 0;
 let aiDifficulty = "medium";
 let ultraUnlockedThisMatch = false;
@@ -262,6 +265,7 @@ function beginComputerTurn() {
   aiStartedAt = started;
   aiDifficulty = difficulty;
   aiProgress = difficulty === "ultra" ? { phase: "preparing", depth: 0, nodes: 0 } : null;
+  aiFallbackResult = null;
   renderAiProgress(difficulty, started);
   renderBoard();
   aiTimer = window.setInterval(() => {
@@ -270,11 +274,12 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.13.0", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.13.1", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {
         aiProgress = data.progress;
+        if (data.progress.best?.move) aiFallbackResult = data.progress.best;
         renderAiProgress(aiDifficulty, aiStartedAt);
         return;
       }
@@ -288,6 +293,27 @@ function beginComputerTurn() {
     });
   }
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
+  if (difficulty === "ultra") {
+    aiWatchdog = window.setTimeout(
+      () => finishTimedOutComputerTurn(requestId),
+      ULTRA_WATCHDOG_MS,
+    );
+  }
+}
+
+/** Terminate an overrun worker and play its last fully validated result. */
+function finishTimedOutComputerTurn(requestId) {
+  if (requestId !== aiRequestId || !computerTurn() || !inputLocked) return;
+  const fallback = aiFallbackResult;
+  const elapsed = performance.now() - aiStartedAt;
+  cancelComputerTurn(true, true);
+  inputLocked = false;
+  if (!fallback?.move) {
+    render();
+    showToast(t("computerSearchFailed"));
+    return;
+  }
+  finishComputerTurn({ ...fallback, elapsed });
 }
 
 /** Render genuine AI search progress rather than a generic activity message. */
@@ -335,11 +361,14 @@ function cancelComputerTurn(invalidate = true, terminateWorker = true) {
   if (invalidate) aiRequestId += 1;
   window.clearInterval(aiTimer);
   aiTimer = 0;
+  window.clearTimeout(aiWatchdog);
+  aiWatchdog = 0;
   if (terminateWorker) {
     aiWorker?.terminate();
     aiWorker = null;
   }
   aiProgress = null;
+  aiFallbackResult = null;
   elements.aiDetail?.classList.remove("thinking");
 }
 

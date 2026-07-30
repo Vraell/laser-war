@@ -71,12 +71,15 @@ node scripts/elo_benchmark.mjs \
 
 The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
 results, estimated Elo with a paired bootstrap 95% interval, illegal moves, and average search time. Search
-errors count as losses instead of aborting the evidence run. Ultra receives a deterministic virtual computation
-budget, so machine load cannot change the completed search depth; real wall time is still reported separately.
+errors count as losses instead of aborting the evidence run. Each AI receives the real Red or Blue state without
+perspective normalization, so side-specific objective errors are exercised in the arena. Ultra receives a
+deterministic virtual computation budget, so machine load cannot change the completed search depth; real wall
+time is still reported separately.
 The Pages workflow gates every deployment on unit tests, the tactical corpus, search-speed non-regression, and
-32 paired Ultra games. Reported failures should also become fixtures in `web/fixtures/`; deterministic tactical
-tests and statistical match tests cover different failure modes. Use `--difficulties ultra`, `--seed-offset N`,
-and `--ultra-time 1000` for focused or larger-node-budget runs.
+32 paired games at each difficulty. Every difficulty and the aggregate result must pass independently. Reported
+failures should also become fixtures in `web/fixtures/`; deterministic tactical tests and statistical match
+tests cover different failure modes. Use `--difficulties ultra`, `--seed-offset N`, and `--ultra-time 1000` for
+focused or larger-node-budget runs.
 
 Analyze a copied English or French match log with a wider offline Ultra search:
 

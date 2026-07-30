@@ -56,6 +56,9 @@ assert.ok(search.killers.size > 0, "Ultra should retain cutoff moves for orderin
 assert.equal(progressEvents[0].phase, "preparing");
 assert.ok(progressEvents.some(({ phase, depth }) => phase === "searching" && depth >= 1));
 assert.ok(progressEvents.some(({ nodes }) => nodes > 0));
+const completedProgress = progressEvents.find(({ best }) => best?.move);
+assert.ok(completedProgress, "Ultra should publish a validated fallback before deep search.");
+assert.ok(game.isLegalMove(state, completedProgress.best.move));
 
 const fixture = JSON.parse(readFileSync(
   new URL("./fixtures/forced_loss_40_move_log.json", import.meta.url),
@@ -496,6 +499,23 @@ chokeState = chokeGame.resolveMove(chokeState, {
 const ultraMate = tacticalProof.prove(chokeState, "top", 1);
 assert.equal(ultraMate.status, "proven");
 assert.deepEqual(ultraMate.line[0], { row: 7, col: 8, mirror: "/" });
+
+const swapKing = (cell) => (cell === "k" ? "K" : cell === "K" ? "k" : cell);
+const invertedMateState = {
+  board: [...chokeState.board].reverse().map(
+    (row) => [...row].reverse().map(swapKing),
+  ),
+  turn: "bottom",
+  winner: null,
+  draw: false,
+};
+const invertedMateMove = { row: 1, col: 0, mirror: "/" };
+assert.equal(
+  game.resolveMove(invertedMateState, invertedMateMove).state.winner,
+  "bottom",
+);
+const invertedMateSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
+assert.deepEqual(invertedMateSearch.choose(invertedMateState).move, invertedMateMove);
 
 console.log(
   `Ultra horizon check passed at depth ${result.depth} `

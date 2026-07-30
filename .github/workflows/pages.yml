@@ -38,7 +38,7 @@ jobs:
         run: >-
           node scripts/elo_benchmark.mjs
           --pairs 32
-          --difficulties ultra
+          --difficulties easy,medium,hard,ultra
           --opening-plies 0,2,4,6,8,10
           --max-plies 72
           --ultra-time 120

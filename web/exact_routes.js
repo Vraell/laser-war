@@ -1,4 +1,4 @@
-import MiniSat from "./minisat.js?v=0.13.0";
+import MiniSat from "./minisat.js?v=0.13.1";
 
 const BOARD_SIZE = 9;
 const EMPTY = ".";
@@ -15,11 +15,8 @@ const DIRECTIONS = {
 };
 const SLASH_TURN = { N: "E", E: "N", S: "W", W: "S" };
 const BACKSLASH_TURN = { N: "W", W: "N", S: "E", E: "S" };
-const MAX_INCREMENTAL_FORMULAS = 96;
-
-let solver = null;
-let nextVariable = 1;
-let formulaCount = 0;
+const HORIZONTAL_DIRECTION = { N: "N", E: "W", S: "S", W: "E" };
+const VERTICAL_DIRECTION = { N: "S", E: "E", S: "N", W: "W" };
 
 function squareKey(row, col) {
   return `${row},${col}`;
@@ -29,33 +26,123 @@ function stateKey(row, col, direction) {
   return `${row},${col},${direction}`;
 }
 
-/** Reset the incremental solver before inactive formulas become excessive. */
-function ensureSolver() {
-  if (!solver || formulaCount >= MAX_INCREMENTAL_FORMULAS) {
-    solver = new MiniSat();
-    nextVariable = 1;
-    formulaCount = 0;
+/** Reflect one board coordinate across either rule-preserving axis. */
+function transformedPosition(row, col, horizontal, vertical) {
+  return [
+    vertical ? BOARD_SIZE - 1 - row : row,
+    horizontal ? BOARD_SIZE - 1 - col : col,
+  ];
+}
+
+/** Reflect the board while preserving top/bottom king identities. */
+function transformedBoard(board, horizontal, vertical) {
+  const transformed = Array.from(
+    { length: BOARD_SIZE },
+    () => Array(BOARD_SIZE).fill(EMPTY),
+  );
+  const swapsMirror = horizontal !== vertical;
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      const [nextRow, nextCol] = transformedPosition(row, col, horizontal, vertical);
+      let cell = board[row][col];
+      if (swapsMirror && cell === SLASH_MIRROR) cell = BACKSLASH_MIRROR;
+      else if (swapsMirror && cell === BACKSLASH_MIRROR) cell = SLASH_MIRROR;
+      if (vertical && cell === TOP_KING) cell = BOTTOM_KING;
+      else if (vertical && cell === BOTTOM_KING) cell = TOP_KING;
+      transformed[nextRow][nextCol] = cell;
+    }
   }
+  return transformed;
 }
 
-/** Allocate one positive MiniSat variable number. */
-function newVariable() {
-  const variable = nextVariable;
-  nextVariable += 1;
-  return variable;
+/** Reflect laser sources into the same canonical board orientation. */
+function transformedSources(sources, horizontal, vertical) {
+  return sources.map(([row, col, direction]) => {
+    const [nextRow, nextCol] = transformedPosition(row, col, horizontal, vertical);
+    let nextDirection = direction;
+    if (horizontal) nextDirection = HORIZONTAL_DIRECTION[nextDirection];
+    if (vertical) nextDirection = VERTICAL_DIRECTION[nextDirection];
+    return [nextRow, nextCol, nextDirection];
+  });
 }
 
-/** Own one activation-guarded formula in the shared incremental solver. */
+/** Reflect the no-turn set alongside its board. */
+function transformedForbidden(forbiddenTurns, horizontal, vertical) {
+  return new Set([...forbiddenTurns].map((square) => {
+    const [row, col] = square.split(",").map(Number);
+    return transformedPosition(row, col, horizontal, vertical).join(",");
+  }));
+}
+
+/** Reflect one witness bit mask into or out of canonical orientation. */
+function transformedMask(mask, horizontal, vertical) {
+  let transformed = 0n;
+  for (let index = 0; index < BOARD_SIZE * BOARD_SIZE; index += 1) {
+    if (!(mask & (1n << BigInt(index)))) continue;
+    const row = Math.floor(index / BOARD_SIZE);
+    const col = index % BOARD_SIZE;
+    const [nextRow, nextCol] = transformedPosition(row, col, horizontal, vertical);
+    transformed |= 1n << BigInt(nextRow * BOARD_SIZE + nextCol);
+  }
+  return transformed;
+}
+
+/** Return the lexicographically stable equivalent route problem. */
+function canonicalProblem(board, sources, forbiddenTurns) {
+  const candidates = [];
+  for (const horizontal of [false, true]) {
+    for (const vertical of [false, true]) {
+      const candidateBoard = transformedBoard(board, horizontal, vertical);
+      candidates.push({
+        board: candidateBoard,
+        sources: transformedSources(sources, horizontal, vertical),
+        forbiddenTurns: transformedForbidden(forbiddenTurns, horizontal, vertical),
+        horizontal,
+        vertical,
+        key: candidateBoard.map((row) => row.join("")).join(""),
+      });
+    }
+  }
+  candidates.sort((left, right) => left.key.localeCompare(right.key));
+  return candidates[0];
+}
+
+/** Return a canonical witness to the caller's original board orientation. */
+function originalWitness(witness, horizontal, vertical) {
+  if (!witness) return null;
+  const swapsMirror = horizontal !== vertical;
+  return {
+    empty: transformedMask(witness.empty, horizontal, vertical),
+    slash: transformedMask(
+      swapsMirror ? witness.backslash : witness.slash,
+      horizontal,
+      vertical,
+    ),
+    backslash: transformedMask(
+      swapsMirror ? witness.slash : witness.backslash,
+      horizontal,
+      vertical,
+    ),
+  };
+}
+
+/** Own one isolated SAT formula so unrelated route queries cannot poison it. */
 class SatFormula {
   constructor() {
-    ensureSolver();
-    this.activation = newVariable();
-    formulaCount += 1;
+    this.solver = new MiniSat();
+    this.nextVariable = 1;
   }
 
-  /** Add a clause that is active only for this board and target pairing. */
+  /** Allocate one positive MiniSat variable number. */
+  newVariable() {
+    const variable = this.nextVariable;
+    this.nextVariable += 1;
+    return variable;
+  }
+
+  /** Add one clause to this board and target pairing. */
   addClause(literals) {
-    solver.addClause([-this.activation, ...literals]);
+    this.solver.addClause(literals);
   }
 
   /** Require exactly one literal using a compact pairwise encoding. */
@@ -73,12 +160,10 @@ class SatFormula {
     }
   }
 
-  /** Solve only this formula while retaining learned clauses globally. */
+  /** Solve this isolated route formula and return its assignment. */
   solve() {
-    solver.ensureVar(nextVariable - 1);
-    const solution = solver.solveAssuming(this.activation) ? solver.getSolution() : null;
-    solver.retireVar(this.activation);
-    return solution;
+    this.solver.ensureVar(this.nextVariable - 1);
+    return this.solver.solve() ? this.solver.getSolution() : null;
   }
 }
 
@@ -90,7 +175,7 @@ function addBeamFlow(formula, board, sources, forbiddenTurns, beamIndex, target,
   const targetEdges = [];
 
   const addEdge = (from, to, conditions, step) => {
-    const variable = newVariable();
+    const variable = formula.newVariable();
     if (from === "source") sourceEdges.push(variable);
     else {
       if (!outgoing.has(from)) outgoing.set(from, []);
@@ -190,7 +275,10 @@ function exactPairingWitness(board, sources, forbiddenTurns, targets) {
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
       if (board[row][col] !== EMPTY && board[row][col] !== SHIELD) continue;
-      const variables = { slash: newVariable(), backslash: newVariable() };
+      const variables = {
+        slash: formula.newVariable(),
+        backslash: formula.newVariable(),
+      };
       mirrors.set(squareKey(row, col), variables);
       formula.atMostOne([variables.slash, variables.backslash]);
     }
@@ -205,6 +293,17 @@ function exactPairingWitness(board, sources, forbiddenTurns, targets) {
 
 /** Return an unrestricted compatible-route witness for opposite king targets. */
 export function exactJointPathWitness(board, sources, forbiddenTurns) {
-  return exactPairingWitness(board, sources, forbiddenTurns, ["top", "bottom"])
-    || exactPairingWitness(board, sources, forbiddenTurns, ["bottom", "top"]);
+  const canonical = canonicalProblem(board, sources, forbiddenTurns);
+  const witness = exactPairingWitness(
+    canonical.board,
+    canonical.sources,
+    canonical.forbiddenTurns,
+    ["top", "bottom"],
+  ) || exactPairingWitness(
+    canonical.board,
+    canonical.sources,
+    canonical.forbiddenTurns,
+    ["bottom", "top"],
+  );
+  return originalWitness(witness, canonical.horizontal, canonical.vertical);
 }

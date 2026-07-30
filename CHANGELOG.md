@@ -13,6 +13,59 @@ versions.
 
 No unreleased changes.
 
+## v0.13.1 - 2026-07-29
+
+### Fixed
+
+- Fixed Easy, Medium, and Hard evaluating every position as Blue. When the
+  computer played Red, this reversed its objective and could make it attack its
+  own king or prefer a human win.
+- Replaced hard-coded Blue-win and Red-win checks in standard reply search with
+  checks relative to the actual computer side.
+- Replaced the route validator's global incremental MiniSat instance with
+  isolated per-query formulas. Unrelated positions could previously accumulate
+  learned clauses until one legality check blocked the Ultra worker for minutes,
+  beyond its nominal search deadline.
+- Canonicalized exact formulas across horizontal and vertical board symmetries,
+  then transforms valid witnesses back to the played orientation. The reported
+  hard UNSAT query fell from roughly 12.7 seconds to under 0.1 seconds without a
+  mirror horizon or approximate legality decision.
+- Ultra now publishes its latest fully validated completed result while
+  searching. An 11-second interface watchdog terminates an overrun worker and
+  plays that result, providing a hard recovery path around synchronous solver
+  stalls.
+- Bumped all browser module cache keys so existing players receive the corrected
+  AI immediately.
+
+### Validation
+
+- Removed the arena's Red-to-Blue perspective normalization. Paired games now
+  call each AI with the real side-to-move state, matching production behavior.
+- Expanded the deployment arena from Ultra-only to 32 paired games at every
+  difficulty, with each difficulty required to pass independently.
+- Added direct objective tests for Easy, Medium, and Hard as both Red and Blue.
+- Added a color-inverted real self-loss regression for Hard and a color-inverted
+  mate-in-one regression for Ultra.
+- Added the reported 11-move freeze as a fixture and a subprocess-bounded route
+  stress test, preventing a solver regression from hanging CI indefinitely.
+
+#### Arena strength
+
+Measured against `v0.13.0` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair). Intervals are 95% paired-bootstrap
+confidence intervals. These are relative Elo changes, not absolute ratings.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 47-3-14 | +198 | +124 to +293 |
+| Medium | 52-3-9 | +283 | +191 to +411 |
+| Hard | 51-3-10 | +264 | +177 to +379 |
+| Ultra | 30-4-30 | 0 | 0 to 0 |
+
+Ultra's playing policy is unchanged in this release, so its exactly even result
+is expected. Its exact legality solver and worker reliability changed, while
+Easy, Medium, and Hard gained strength from evaluating the correct side.
+
 ## [v0.13.0](https://github.com/Vraell/laser-war/commit/ccdcc50) - 2026-07-29
 
 ### Player sides
@@ -37,6 +90,12 @@ No unreleased changes.
   regressions from one noisy timing run.
 - Added perspective, persistence, translation, progress, AI tie-breaking, and
   arena regression tests.
+
+#### Arena strength
+
+Reliable per-difficulty Elo estimates are unavailable for this historical
+release. Its arena normalized Red positions to Blue before calling the AI,
+which concealed the side-selection regression fixed in `v0.13.1`.
 
 ## [v0.12.0](https://github.com/Vraell/laser-war/compare/c1cf824...1a75e2a) - 2026-07-29
 
@@ -179,5 +238,9 @@ and features below are based on the commits that remain in the repository.
 - Record behavior and impact, not only filenames or commit titles.
 - Include important rejected experiments when they explain why the shipped
   design is intentionally simpler.
+- Every release must report arena-based estimates for Easy, Medium, Hard, and
+  Ultra, including the comparison baseline, paired sample size, W-D-L result,
+  and 95% interval. Explicitly mark unavailable or invalid historical data
+  rather than inventing a rating.
 - Never claim an Elo or speed improvement without recording the arena setup,
   sample size, and uncertainty.
