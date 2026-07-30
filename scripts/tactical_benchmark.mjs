@@ -84,6 +84,14 @@ const cases = [
       assert.deepEqual(result.move, survivals[0].move);
     },
   },
+  {
+    name: "retain live-beam counterplay beyond the quiet root limit",
+    fixture: "ultra_loss_reversed_28_move_log.json",
+    plies: 16,
+    verify(_game, _state, result) {
+      assert.deepEqual(result.move, { row: 5, col: 1, mirror: "/" });
+    },
+  },
 ];
 
 for (const tacticalCase of cases) {

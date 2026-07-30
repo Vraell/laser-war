@@ -1,10 +1,11 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.5";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.5";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.6";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.6";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
   maxDepth: 12,
   rootLimit: 16,
+  tacticalForcingRootLimit: 6,
   branchLimits: [22, 14, 10],
   proofMaxNodes: 0,
 };
@@ -394,11 +395,21 @@ export class UltraSearch {
     if (mirrors >= 8 || timing.latePosition || this.isTacticalPosition(state)) return bestMove;
     const scores = this.rootScores.get(rootKey);
     if (!scores) return bestMove;
-    const candidates = [...this.childrenCache.get(rootKey) || []]
+    const rootChildren = this.childrenCache.get(rootKey) || [];
+    const bestChild = rootChildren.find(
+      ({ move }) => moveKey(move) === moveKey(bestMove),
+    )?.state;
+    const bestExchange = bestChild ? this.shieldExchange(state, bestChild) : 0;
+    const bestStrategicScore = bestChild
+      ? -this.strategicEvaluation(bestChild)
+      : bestScore;
+    const candidates = [...rootChildren]
       .filter(({ move, state: child }) => {
         const score = scores.get(moveKey(move));
         return score !== undefined
           && score === bestScore
+          && this.shieldExchange(state, child) >= bestExchange
+          && -this.strategicEvaluation(child) === bestStrategicScore
           && child.winner !== (state.turn === "top" ? "bottom" : "top")
           && this.strictChild(state, move, child);
       });
@@ -418,15 +429,25 @@ export class UltraSearch {
   selectRootChildren(state) {
     const ordered = this.orderedChildren(state, 0);
     const selected = ordered.slice(0, this.profile.rootLimit);
-    if (this.profile.includeForcingRoots === false || !this.shouldExpandRoot(state)) return selected;
+    if (this.profile.includeForcingRoots === false) return selected;
+    const expandAll = this.shouldExpandRoot(state);
+    const forcingLimit = expandAll
+      ? Infinity
+      : this.needsForcingCounterplay(state)
+        ? this.profile.tacticalForcingRootLimit ?? 6
+        : 0;
+    if (!forcingLimit) return selected;
 
     const selectedKeys = new Set(selected.map(({ move }) => moveKey(move)));
     const forcingKeys = new Set([...this.forcingMoves(state)].map(moveKey));
+    let added = 0;
     for (const item of ordered) {
       const key = moveKey(item.move);
       if (!forcingKeys.has(key) || selectedKeys.has(key)) continue;
       selected.push(item);
       selectedKeys.add(key);
+      added += 1;
+      if (added >= forcingLimit) break;
     }
     return selected;
   }
@@ -1003,6 +1024,17 @@ export class UltraSearch {
     const routePressure = routePressureScore(this.game.routeCostsByLaser(state.board), own, opponent);
     const beams = this.game.fireLasers(state.board);
     return routePressure <= -180 || beams.some((beam) => beam.hitShield || beam.hitKing);
+  }
+
+  /** Detect a severe route deficit that warrants widening live-beam counterplay. */
+  needsForcingCounterplay(state) {
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    return routePressureScore(
+      this.game.routeCostsByLaser(state.board),
+      own,
+      opponent,
+    ) <= -300;
   }
 }
 

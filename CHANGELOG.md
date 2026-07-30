@@ -13,6 +13,53 @@ versions.
 
 No unreleased changes.
 
+## v0.13.6 - 2026-07-30
+
+### Ultra counterplay
+
+- Fixed a reversed-side loss in which opening variety selected `/ R5C6` over
+  `\ R1C8`. The two moves tied at the deepest selective root score, but the
+  former was substantially worse under wider analysis. Random opening choices
+  must now also tie the chosen move's strategic score and must not have a worse
+  immediate shield exchange.
+- Added bounded tactical root widening when Ultra has a severe route deficit.
+  The six strongest placements on the live laser paths are retained alongside
+  the ordinary 16 roots. In the reported game this restores `/ R6C2`, which
+  was ranked 25th and previously disappeared before search.
+- Kept the widening narrow: ordinary tactical positions still use the existing
+  root, while active shield or king impacts and late boards retain the broader
+  established policy. This avoids globally increasing search cost.
+- Corrected the offline analyzer's assumption that the human always controls
+  Red. Copied Blue-side games now label the winner, evaluation sign, tactical
+  proofs, and move quality from the actual human perspective.
+- Added the complete 28-ply reversed-side loss and both failure points as
+  deterministic regressions. The production-budget replay now selects
+  `\ R1C8` at move 3 in about 1.6 seconds and `/ R6C2` at move 17 at completed
+  depth 6 in about 5.0 seconds.
+
+### Validation
+
+- Passed all 12 automated test suites, the 335-ply tactical corpus with four
+  critical positions, exact-route regression, and fixed-depth speed
+  non-regression.
+- A broad -180 tactical widening initially scored `26-8-30` over 64 games,
+  approximately `-22 Elo`, and was rejected. Restricting the widening to severe
+  route deficits scored `28-8-28`, exactly neutral on the same openings.
+
+#### Arena strength
+
+Measured against `v0.13.5` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair).
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 28-8-28 | 0 | 0 to 0 |
+| Medium | 29-6-29 | 0 | 0 to 0 |
+| Hard | 29-6-29 | 0 | 0 to 0 |
+| Ultra | 30-4-30 | 0 | 0 to 0 |
+
+Ultra averaged 16.3 ms per move versus 16.5 ms for `v0.13.5`.
+
 ## v0.13.5 - 2026-07-30
 
 ### Evaluation cleanup

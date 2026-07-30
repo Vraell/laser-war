@@ -46,7 +46,7 @@ function analyzeTask(task) {
     Infinity,
     1,
   );
-  const humanSign = state.turn === "bottom" ? 1 : -1;
+  const humanSign = state.turn === task.humanSide ? 1 : -1;
   return {
     index: task.index,
     bestMove: best.move,
@@ -157,9 +157,11 @@ function parseTextLog(text) {
   }
   if (!moves.length) throw new Error("No moves were found in the copied match log.");
   const metadataLine = lines.find((line, index) => index > 0 && line.includes("·"));
+  const blueHuman = /(?:You|Vous)\s*\((?:Blue|Bleu|Bleue)\)/i.test(metadataLine || "");
   return {
     title: lines[0] || "LASER WAR · MATCH ANALYSIS",
     metadata: metadataLine || "",
+    humanSide: blueHuman || moves[0].actor === "Computer" ? "top" : "bottom",
     moves,
   };
 }
@@ -167,21 +169,24 @@ function parseTextLog(text) {
 /** Normalize the fixture and saved-match JSON forms used by the project. */
 function parseJsonLog(text) {
   const data = JSON.parse(text);
+  const humanSide = data.humanSide === "top" ? "top" : "bottom";
   const sourceMoves = data.moves || data.matches?.[0]?.moves;
   if (!Array.isArray(sourceMoves) || !sourceMoves.length) {
     throw new Error("JSON input does not contain a non-empty moves array.");
   }
   const moves = sourceMoves.map((move, index) => {
+    const mover = index % 2 === 0 ? "bottom" : "top";
+    const actor = mover === humanSide ? "You" : "Computer";
     if (Array.isArray(move)) {
       return {
-        actor: index % 2 === 0 ? "You" : "Computer",
+        actor,
         row: Number(move[0]) - 1,
         col: Number(move[1]) - 1,
         mirror: move[2],
       };
     }
     return {
-      actor: move.actor || (index % 2 === 0 ? "You" : "Computer"),
+      actor: move.actor || actor,
       row: Number(move.row),
       col: Number(move.col),
       mirror: move.mirror,
@@ -190,6 +195,7 @@ function parseJsonLog(text) {
   return {
     title: data.title || "LASER WAR · MATCH ANALYSIS",
     metadata: data.metadata || data.description || "",
+    humanSide,
     moves,
   };
 }
@@ -229,6 +235,7 @@ function replayMatch(match) {
     tasks.push({
       index,
       state: structuredClone(state),
+      humanSide: match.humanSide,
       move: { row: move.row, col: move.col, mirror: move.mirror },
     });
     const outcome = game.resolveMove(state, move);
@@ -311,8 +318,10 @@ function qualityLabel(loss) {
 }
 
 /** Prefer exact forced-win transitions over heuristic move labels. */
-function tacticalQuality(move, before, after, heuristic) {
-  const mover = move.actor === "You" ? "bottom" : "top";
+function tacticalQuality(move, before, after, heuristic, humanSide) {
+  const mover = move.actor === "You"
+    ? humanSide
+    : (humanSide === "top" ? "bottom" : "top");
   const opponent = mover === "bottom" ? "top" : "bottom";
   if (before?.winner === mover && after?.winner === opponent) return "Throws forced win";
   if (after?.winner === mover) {
@@ -327,7 +336,7 @@ function tacticalQuality(move, before, after, heuristic) {
 /** Produce one self-contained interactive HTML analysis report. */
 function buildReport(payload) {
   const terminal = payload.finalState.winner
-    ? `${payload.finalState.winner === "bottom" ? "You" : "Ultra"} won`
+    ? `${payload.finalState.winner === payload.match.humanSide ? "You" : "Ultra"} won`
     : payload.finalState.draw ? "Draw" : "Unfinished";
   const enriched = payload.moves.map((move, index) => {
     const tacticalBefore = payload.tacticalProofs[index];
@@ -341,6 +350,7 @@ function buildReport(payload) {
         tacticalBefore,
         tacticalAfter,
         qualityLabel(payload.analysis[index].loss),
+        payload.match.humanSide,
       ),
       tacticalBefore,
       tacticalAfter,
@@ -474,7 +484,8 @@ function buildReport(payload) {
       : (value > 0 ? "+" : "") + Math.round(value);
     const moveText = move => move ? move.mirror + " R" + (move.row + 1) + "C" + (move.col + 1) : "";
     const proofText = proof => !proof ? "No short forced win proven"
-      : (proof.winner === "bottom" ? "You force" : "Ultra forces") + " a win in " + proof.distance + " plies";
+      : (proof.winner === data.match.humanSide ? "You force" : "Ultra forces")
+        + " a win in " + proof.distance + " plies";
     function drawChart() {
       const ratio = devicePixelRatio || 1; const box = chart.getBoundingClientRect();
       chart.width = Math.round(box.width * ratio); chart.height = Math.round(box.height * ratio);
@@ -597,21 +608,23 @@ async function main() {
   }
   const tacticalProofs = analyzeTactics(replay, options);
   const positionEvaluations = analysis.map((item, index) => (
-    item.bestScoreForMover * (replay.tasks[index].state.turn === "bottom" ? 1 : -1)
+    item.bestScoreForMover * (
+      replay.tasks[index].state.turn === match.humanSide ? 1 : -1
+    )
   ));
   const finalEvaluation = replay.finalState.winner
-    ? replay.finalState.winner === "bottom" ? 10000 : -10000
+    ? replay.finalState.winner === match.humanSide ? 10000 : -10000
     : replay.finalState.draw ? 0 : (() => {
       const game = new Game();
       const search = new UltraSearch(game, () => 0, { ...DEFAULT_PROFILE, maxDepth: 1 });
       const score = search.strategicEvaluation(replay.finalState);
-      return score * (replay.finalState.turn === "bottom" ? 1 : -1);
+      return score * (replay.finalState.turn === match.humanSide ? 1 : -1);
     })();
   positionEvaluations.push(finalEvaluation);
   for (let index = 0; index < tacticalProofs.length; index += 1) {
     const proof = tacticalProofs[index];
     if (!proof) continue;
-    positionEvaluations[index] = (proof.winner === "bottom" ? 1 : -1)
+    positionEvaluations[index] = (proof.winner === match.humanSide ? 1 : -1)
       * (10000 - proof.distance);
   }
   const outputPath = resolve(

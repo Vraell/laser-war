@@ -401,6 +401,7 @@ const productionSearch = new UltraSearch(game, () => 0);
 assert.ok(productionSearch.profile.maxDepth >= 12);
 assert.equal(productionSearch.profile.timeLimit, 10000);
 assert.equal(productionSearch.profile.rootLimit, 16);
+assert.equal(productionSearch.profile.tacticalForcingRootLimit, 6);
 assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
 assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
@@ -416,6 +417,7 @@ varietySearch.rootScores.set(varietyKey, new Map([
   [((openingChildren[1].move.row * 9 + openingChildren[1].move.col) * 2) + 1, 120],
   [((openingChildren[2].move.row * 9 + openingChildren[2].move.col) * 2), 119],
 ]));
+varietySearch.strategicEvaluation = () => -120;
 assert.deepEqual(
   varietySearch.openingVariation(
     varietyState,
@@ -425,6 +427,82 @@ assert.deepEqual(
     { latePosition: false },
   ),
   openingChildren[1].move,
+);
+
+const reversedLossFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_reversed_28_move_log.json", import.meta.url),
+));
+let reversedOpeningState = game.initialState();
+for (const [row, col, mirror] of reversedLossFixture.moves.slice(0, 2)) {
+  reversedOpeningState = game.resolveMove(reversedOpeningState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const safeOpeningMove = { row: 0, col: 7, mirror: "\\" };
+const weakerTiedOpeningMove = { row: 4, col: 5, mirror: "/" };
+const reversedOpeningChildren = [safeOpeningMove, weakerTiedOpeningMove].map((move) => ({
+  move,
+  state: game.resolveMove(reversedOpeningState, move).state,
+}));
+const reversedVariationSearch = new UltraSearch(
+  game,
+  () => 0,
+  TEST_PROFILE,
+  () => {},
+  () => 0.99,
+);
+const reversedOpeningKey = reversedVariationSearch.keyForState(reversedOpeningState);
+reversedVariationSearch.childrenCache.set(reversedOpeningKey, reversedOpeningChildren);
+reversedVariationSearch.rootScores.set(reversedOpeningKey, new Map([
+  [((safeOpeningMove.row * 9 + safeOpeningMove.col) * 2) + 1, -68],
+  [((weakerTiedOpeningMove.row * 9 + weakerTiedOpeningMove.col) * 2), -68],
+]));
+assert.equal(
+  reversedVariationSearch.shieldExchange(
+    reversedOpeningState,
+    reversedOpeningChildren[1].state,
+  ),
+  1,
+);
+assert.ok(
+  -reversedVariationSearch.strategicEvaluation(reversedOpeningChildren[0].state)
+    > -reversedVariationSearch.strategicEvaluation(reversedOpeningChildren[1].state),
+);
+assert.deepEqual(
+  reversedVariationSearch.openingVariation(
+    reversedOpeningState,
+    reversedOpeningKey,
+    safeOpeningMove,
+    -68,
+    { latePosition: false },
+  ),
+  safeOpeningMove,
+  "Opening variety must not replace the best move with a strategically weaker search tie.",
+);
+
+let reversedCounterplayState = game.initialState();
+for (const [row, col, mirror] of reversedLossFixture.moves.slice(0, 16)) {
+  reversedCounterplayState = game.resolveMove(reversedCounterplayState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const reversedCounterplaySearch = new UltraSearch(game, () => 0, {
+  ...TEST_PROFILE,
+  maxDepth: 4,
+  rootLimit: 16,
+  tacticalForcingRootLimit: 6,
+  branchLimits: [22, 14, 10],
+});
+assert.equal(reversedCounterplaySearch.isTacticalPosition(reversedCounterplayState), true);
+assert.equal(reversedCounterplaySearch.needsForcingCounterplay(reversedCounterplayState), true);
+assert.deepEqual(
+  reversedCounterplaySearch.choose(reversedCounterplayState).move,
+  { row: 5, col: 1, mirror: "/" },
+  "Ultra must retain the strongest live-beam counterplay outside the quiet root limit.",
 );
 const commonOpeningState = game.resolveMove(game.initialState(), {
   row: 4,

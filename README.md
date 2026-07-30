@@ -24,14 +24,16 @@ survive game updates.
 
 Ultra combines iterative deepening, alpha-beta principal-variation search, transposition bounds, history and
 killer ordering, and a selective tactical extension. It checks every legal mate-in-one before pruning the root,
-and every move that can alter the current laser volley is searched alongside the strongest quiet candidates, so
-tactical defenses do not disappear behind a positional shortlist. Quiet turns target four seconds; developed or
-unstable positions can progressively use six, eight, or at most ten seconds. Search runs in a Web Worker and
-keeps move-ordering knowledge across turns without freezing the interface. A separate proof-number-style solver
+and widens the root with live-beam moves when the current volley is active, the board is late, or route pressure
+shows that immediate counterplay is necessary. Quiet turns target four seconds; developed or unstable positions
+can progressively use six, eight, or at most ten seconds. Search runs in a Web Worker and keeps the interface
+responsive. Turn-local search tables are reset before every move so stale ordering cannot hide a new tactic.
+A separate proof-number-style solver
 certifies short forcing lines in offline analysis and tactical regression tests; an always-on production prepass
 was removed after ablation testing showed that ordinary search used the same compute more effectively.
-During quiet openings, Ultra varies its play only among moves tied at the deepest completed root score. This
-provides different games without knowingly selecting a lower-evaluated move.
+During quiet openings, Ultra varies its play only among moves tied in both the deepest completed root score and
+the strategic evaluation, with no worse immediate shield exchange. This provides different games without
+using a shallow search tie to select a strategically weaker move.
 
 The static evaluation is intentionally small and auditable. It scores surviving shield material, permanent
 one-king laser assignments, exact per-laser route costs, and current king exposure. Every shield has the same
