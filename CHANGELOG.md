@@ -26,9 +26,9 @@ No unreleased changes.
   isolated per turn.
 - Bumped browser cache keys so active installations receive the corrected
   worker and AI modules.
-- Doubled the completed laser volley's visible duration without changing its
-  travel speed, and replaced the single moving beam highlight with five evenly
-  spaced particles.
+- Set the laser volley to 0.8 seconds of travel and 1.3 seconds of total display,
+  and replaced the single moving beam highlight with five evenly spaced
+  particles.
 
 ### Validation
 
@@ -237,15 +237,16 @@ which concealed the side-selection regression fixed in `v0.13.1`.
 Version numbers for this period are not reliably recoverable. The chronology
 and features below are based on the commits that remain in the repository.
 
-### Game foundation - July 23
+### Ultra and analysis - July 25
 
-- Built the original Python game, rules engine, desktop interface, match session,
-  and initial computer opponent.
-- Fixed laser reachability, tactical evaluation, undo/redo synchronization, and
-  the crash caused by replaying stale AI moves.
-- Limited undo and redo to the intended single move and retained the decisive
-  laser volley on the result screen.
-- Reworked typography and board presentation after the first playable builds.
+- Added unlockable Ultra difficulty and progressively hardened its iterative
+  search, route control, tactical recovery, and legality handling.
+- Moved AI work into a Web Worker, exposed live search progress, and fixed route
+  solver stalls that could freeze a match.
+- Added regression fixtures from real losses, AI-vs-AI Elo experiments, and a
+  visual offline match analyzer with evaluation charts and board replay.
+- Added tactical finish detection and short forcing-line proof search, while
+  preserving the final laser path long enough to explain wins and losses.
 
 ### Rules and distribution - July 24 to 25
 
@@ -260,16 +261,15 @@ and features below are based on the commits that remain in the repository.
   move feedback, sound, animated impacts, retained end-state beams, local
   progress, and clipboard-ready match logs.
 
-### Ultra and analysis - July 25
+### Game foundation - July 23
 
-- Added unlockable Ultra difficulty and progressively hardened its iterative
-  search, route control, tactical recovery, and legality handling.
-- Moved AI work into a Web Worker, exposed live search progress, and fixed route
-  solver stalls that could freeze a match.
-- Added regression fixtures from real losses, AI-vs-AI Elo experiments, and a
-  visual offline match analyzer with evaluation charts and board replay.
-- Added tactical finish detection and short forcing-line proof search, while
-  preserving the final laser path long enough to explain wins and losses.
+- Built the original Python game, rules engine, desktop interface, match session,
+  and initial computer opponent.
+- Fixed laser reachability, tactical evaluation, undo/redo synchronization, and
+  the crash caused by replaying stale AI moves.
+- Limited undo and redo to the intended single move and retained the decisive
+  laser volley on the result screen.
+- Reworked typography and board presentation after the first playable builds.
 
 ## Maintaining This File
 

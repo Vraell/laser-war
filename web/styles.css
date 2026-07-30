@@ -593,7 +593,7 @@ button.quiet {
 .beam-core {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: fire-beam 620ms ease-out forwards;
+  animation: fire-beam 800ms ease-out forwards;
 }
 
 .beam-glow {

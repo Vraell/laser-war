@@ -25,7 +25,7 @@ import {
 
 const SAVE_KEY = "laser-war.web.v1";
 const GAME_VERSION = "v0.13.2";
-const BEAM_VISIBLE_MS = 1_840;
+const BEAM_VISIBLE_MS = 1_300;
 const ULTRA_WATCHDOG_MS = 11_000;
 const game = new Game();
 
