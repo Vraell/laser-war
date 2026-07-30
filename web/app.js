@@ -1,19 +1,19 @@
-import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.13.2";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.13.3";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.13.2";
+} from "./save.js?v=0.13.3";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.13.2";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.13.2";
-import { beamPoints } from "./beam.js?v=0.13.2";
-import { drawDetailKey } from "./result.js?v=0.13.2";
+} from "./progress.js?v=0.13.3";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.13.3";
+import { beamPoints } from "./beam.js?v=0.13.3";
+import { drawDetailKey } from "./result.js?v=0.13.3";
 import {
   BLUE_SIDE,
   RED_SIDE,
@@ -21,10 +21,11 @@ import {
   logicalSquare,
   opposingSide,
   perspectiveLabels,
-} from "./perspective.js?v=0.13.2";
+} from "./perspective.js?v=0.13.3";
 
 const SAVE_KEY = "laser-war.web.v1";
-const GAME_VERSION = "v0.13.2";
+const SOUND_KEY = "laser-war.sound.v1";
+const GAME_VERSION = "v0.13.3";
 const BEAM_VISIBLE_MS = 1_300;
 const ULTRA_WATCHDOG_MS = 11_000;
 const game = new Game();
@@ -36,6 +37,7 @@ const elements = {
   beams: document.querySelector("#beams"),
   status: document.querySelector("#status"),
   statusLight: document.querySelector("#status-light"),
+  statusBlock: document.querySelector(".status-block"),
   modeLabel: document.querySelector("#mode-label"),
   log: document.querySelector("#match-log"),
   matchMeta: document.querySelector("#match-meta"),
@@ -51,7 +53,7 @@ const elements = {
   resultDetail: document.querySelector("#result-detail"),
   toast: document.querySelector("#toast"),
   rules: document.querySelector("#rules-dialog"),
-  sound: document.querySelector("#sound-toggle"),
+  soundButtons: [...document.querySelectorAll("[data-sound-toggle]")],
   ultraDifficulty: document.querySelector("#ultra-difficulty"),
   ultraState: document.querySelector("#ultra-state"),
   progressNote: document.querySelector("#progress-note"),
@@ -210,7 +212,8 @@ function playMove(move, actor) {
   try {
     outcome = game.resolveMove(session.state, move);
   } catch (error) {
-    showToast(t("illegalMove"));
+    audio.play("illegal");
+    showToast(t("illegalMove"), "warning");
     return;
   }
 
@@ -233,6 +236,7 @@ function playMove(move, actor) {
   refreshLegalMoves();
   render();
   renderBeams(outcome.beams);
+  audio.play("place");
   audio.play(outcome.destroyed.length ? "impact" : "laser");
   saveGame();
   const matchId = session.id;
@@ -247,6 +251,7 @@ function playMove(move, actor) {
     } else {
       clearBeams();
       if (computerTurn()) beginComputerTurn();
+      else audio.play("turn");
     }
   }, BEAM_VISIBLE_MS);
 }
@@ -274,7 +279,7 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.13.2", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.13.3", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {
@@ -289,7 +294,7 @@ function beginComputerTurn() {
       cancelComputerTurn();
       inputLocked = false;
       render();
-      showToast(t("computerSearchFailed"));
+      showToast(t("computerSearchFailed"), "warning");
     });
   }
   aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
@@ -310,7 +315,7 @@ function finishTimedOutComputerTurn(requestId) {
   inputLocked = false;
   if (!fallback?.move) {
     render();
-    showToast(t("computerSearchFailed"));
+    showToast(t("computerSearchFailed"), "warning");
     return;
   }
   finishComputerTurn({ ...fallback, elapsed });
@@ -392,8 +397,11 @@ function render() {
 
 /** Synchronize mirror controls with the active orientation. */
 function renderMirrorSelection() {
-  elements.slash.classList.toggle("selected", selectedMirror === Cell.SLASH);
-  elements.backslash.classList.toggle("selected", selectedMirror === Cell.BACKSLASH);
+  const slashSelected = selectedMirror === Cell.SLASH;
+  elements.slash.classList.toggle("selected", slashSelected);
+  elements.backslash.classList.toggle("selected", !slashSelected);
+  elements.slash.setAttribute("aria-pressed", String(slashSelected));
+  elements.backslash.setAttribute("aria-pressed", String(!slashSelected));
   elements.slash.disabled = !canHumanAct();
   elements.backslash.disabled = !canHumanAct();
 }
@@ -515,7 +523,8 @@ function cellLabel(row, col, value, moveIsLegal, explainable = false) {
 /** Explain why a clicked illegal placement was rejected. */
 function explainIllegalMove(move) {
   const reason = game.illegalMoveReason(session.state, move) || "illegalMove";
-  showToast(t(reason));
+  audio.play("illegal");
+  showToast(t(reason), "warning");
 }
 
 /** Render the current turn, search, or terminal status. */
@@ -541,6 +550,7 @@ function renderStatus() {
   elements.status.textContent = text;
   elements.statusLight.style.background = color;
   elements.statusLight.style.color = color;
+  elements.statusBlock.style.setProperty("--status-color", color);
 }
 
 /** Rebuild the localized and scrollable current-match history. */
@@ -679,7 +689,13 @@ function showResult(playSound = true) {
     elements.resultTitle.style.color = sideColor(session.state.winner);
     elements.resultDetail.textContent = moveCount(session.history.length);
   }
-  if (playSound) audio.play("victory");
+  if (!playSound) return;
+  if (session.state.draw) audio.play("draw");
+  else if (session.mode === "computer" && session.state.winner !== session.humanSide) {
+    audio.play("defeat");
+  } else {
+    audio.play("victory");
+  }
 }
 
 function restart() {
@@ -713,7 +729,7 @@ function saveGame() {
     localStorage.setItem(SAVE_KEY, JSON.stringify(buildActiveSave(session)));
     elements.continueButton.disabled = false;
   } catch {
-    showToast(t("storageFailed"));
+    showToast(t("storageFailed"), "warning");
   }
 }
 
@@ -771,7 +787,7 @@ function continueGame() {
     localStorage.removeItem(SAVE_KEY);
     elements.continueButton.disabled = true;
     returnToMenu();
-    showToast(t("loadFailed", { error: error.message }));
+    showToast(t("loadFailed", { error: error.message }), "warning");
     return;
   }
   if (session.state.winner || session.state.draw) {
@@ -849,21 +865,25 @@ function currentLogText() {
 /** Copy the current localized match log or explain why copying failed. */
 async function copyMatchLog() {
   if (!session.history.length) {
-    showToast(t("noMovesToCopy"));
+    audio.play("illegal");
+    showToast(t("noMovesToCopy"), "warning");
     return;
   }
   try {
     await navigator.clipboard.writeText(currentLogText());
-    showToast(t("logCopied"));
+    audio.play("copy");
+    showToast(t("logCopied"), "success");
   } catch {
-    showToast(t("copyFailed"));
+    audio.play("illegal");
+    showToast(t("copyFailed"), "warning");
   }
 }
 
 /** Display a transient message for the standard toast duration. */
-function showToast(message) {
+function showToast(message, tone = "info") {
   window.clearTimeout(toastTimer);
   elements.toast.textContent = message;
+  elements.toast.dataset.tone = tone;
   elements.toast.classList.add("visible");
   toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 2600);
 }
@@ -871,6 +891,7 @@ function showToast(message) {
 /** Apply a mirror orientation and immediately refresh its visual state. */
 function selectMirror(mirror) {
   if (inputLocked) return;
+  if (selectedMirror !== mirror) audio.play("select");
   selectedMirror = mirror;
   renderMirrorSelection();
   renderBoard();
@@ -878,7 +899,9 @@ function selectMirror(mirror) {
 
 /** Apply, persist, and rerender the selected interface language. */
 function applyLanguage(nextLanguage, persist = true) {
-  language = nextLanguage === "fr" ? "fr" : "en";
+  const normalized = nextLanguage === "fr" ? "fr" : "en";
+  if (persist && normalized !== language) audio.play("select");
+  language = normalized;
   if (persist) saveLanguage(localStorage, language);
   document.documentElement.lang = language;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
@@ -904,72 +927,184 @@ function applyLanguage(nextLanguage, persist = true) {
   audio.updateLabel();
 }
 
-class Audio {
+class SoundEffects {
   /** Initialize lazy browser-audio state without requesting playback yet. */
   constructor() {
-    this.enabled = true;
+    try {
+      this.enabled = localStorage.getItem(SOUND_KEY) !== "off";
+    } catch {
+      this.enabled = true;
+    }
     this.context = null;
   }
 
   /** Toggle effects and synchronize the sound control label. */
   toggle() {
+    if (this.enabled) this.play("toggle");
     this.enabled = !this.enabled;
-    elements.sound.textContent = this.enabled ? "♪" : "×";
+    try {
+      localStorage.setItem(SOUND_KEY, this.enabled ? "on" : "off");
+    } catch {
+      // Sound still works for this session when storage is unavailable.
+    }
     this.updateLabel();
+    if (this.enabled) this.play("toggle");
   }
 
   /** Update localized accessible text for the sound control. */
   updateLabel() {
     const label = this.enabled ? t("muteSound") : t("enableSound");
-    elements.sound.setAttribute("aria-label", label);
-    elements.sound.setAttribute("title", label);
+    for (const button of elements.soundButtons) {
+      button.dataset.muted = String(!this.enabled);
+      button.setAttribute("aria-label", label);
+      button.setAttribute("title", label);
+      button.setAttribute("aria-pressed", String(this.enabled));
+    }
   }
 
-  /** Synthesize and play a named lightweight interface effect. */
+  /** Create one short oscillator voice within a named interface cue. */
+  tone({ from, to = from, duration, delay = 0, gain = 0.08, type = "sine" }) {
+    const startsAt = this.context.currentTime + delay;
+    const oscillator = this.context.createOscillator();
+    const envelope = this.context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(from, startsAt);
+    oscillator.frequency.exponentialRampToValueAtTime(to, startsAt + duration);
+    envelope.gain.setValueAtTime(Math.max(0.001, gain), startsAt);
+    envelope.gain.exponentialRampToValueAtTime(0.001, startsAt + duration);
+    oscillator.connect(envelope).connect(this.context.destination);
+    oscillator.start(startsAt);
+    oscillator.stop(startsAt + duration);
+  }
+
+  /** Synthesize one compact cue from a consistent electronic sound palette. */
   play(name) {
     if (!this.enabled) return;
+    const cues = {
+      toggle: [
+        { from: 420, to: 620, duration: 0.06, gain: 0.055, type: "triangle" },
+      ],
+      select: [
+        { from: 540, to: 760, duration: 0.055, gain: 0.06, type: "triangle" },
+        { from: 980, to: 760, duration: 0.035, gain: 0.025, type: "sine" },
+      ],
+      confirm: [
+        { from: 330, to: 430, duration: 0.07, gain: 0.065, type: "triangle" },
+        { from: 520, to: 680, duration: 0.08, delay: 0.045, gain: 0.055, type: "triangle" },
+      ],
+      panel: [
+        { from: 260, to: 390, duration: 0.08, gain: 0.045, type: "sine" },
+      ],
+      place: [
+        { from: 210, to: 145, duration: 0.055, gain: 0.09, type: "triangle" },
+        { from: 1050, to: 720, duration: 0.04, gain: 0.03, type: "sine" },
+      ],
+      laser: [
+        { from: 150, to: 920, duration: 0.22, gain: 0.105, type: "sawtooth" },
+        { from: 90, to: 340, duration: 0.24, gain: 0.07, type: "triangle" },
+      ],
+      impact: [
+        { from: 150, to: 820, duration: 0.18, gain: 0.09, type: "sawtooth" },
+        { from: 105, to: 48, duration: 0.2, delay: 0.12, gain: 0.15, type: "triangle" },
+        { from: 1250, to: 260, duration: 0.12, delay: 0.11, gain: 0.055, type: "square" },
+      ],
+      illegal: [
+        { from: 170, to: 115, duration: 0.12, gain: 0.065, type: "square" },
+        { from: 135, to: 105, duration: 0.1, delay: 0.07, gain: 0.045, type: "square" },
+      ],
+      turn: [
+        { from: 500, to: 660, duration: 0.08, gain: 0.045, type: "sine" },
+      ],
+      copy: [
+        { from: 650, to: 820, duration: 0.07, gain: 0.045, type: "triangle" },
+        { from: 820, to: 1040, duration: 0.09, delay: 0.055, gain: 0.04, type: "triangle" },
+      ],
+      victory: [
+        { from: 392, duration: 0.16, gain: 0.07, type: "triangle" },
+        { from: 523, duration: 0.18, delay: 0.1, gain: 0.07, type: "triangle" },
+        { from: 659, to: 784, duration: 0.28, delay: 0.2, gain: 0.075, type: "triangle" },
+      ],
+      defeat: [
+        { from: 440, to: 390, duration: 0.16, gain: 0.065, type: "triangle" },
+        { from: 330, to: 280, duration: 0.18, delay: 0.11, gain: 0.065, type: "triangle" },
+        { from: 220, to: 165, duration: 0.24, delay: 0.22, gain: 0.07, type: "triangle" },
+      ],
+      draw: [
+        { from: 330, to: 392, duration: 0.18, gain: 0.06, type: "sine" },
+        { from: 392, to: 330, duration: 0.2, delay: 0.14, gain: 0.055, type: "sine" },
+      ],
+    };
     try {
-      this.context ||= new AudioContext();
-      const oscillator = this.context.createOscillator();
-      const gain = this.context.createGain();
-      const settings = {
-        laser: [210, 0.16],
-        impact: [110, 0.12],
-        victory: [520, 0.32],
-      }[name] || [440, 0.08];
-      oscillator.frequency.setValueAtTime(settings[0], this.context.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(settings[0] * 1.8, this.context.currentTime + settings[1]);
-      gain.gain.setValueAtTime(0.234, this.context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.context.currentTime + settings[1]);
-      oscillator.connect(gain).connect(this.context.destination);
-      oscillator.start();
-      oscillator.stop(this.context.currentTime + settings[1]);
+      const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+      if (!AudioContextClass) return;
+      this.context ||= new AudioContextClass();
+      if (this.context.state === "suspended") this.context.resume();
+      for (const voice of cues[name] || cues.select) this.tone(voice);
     } catch {
-      this.enabled = false;
+      // Audio failure must never interrupt the game.
     }
   }
 }
 
-const audio = new Audio();
+const audio = new SoundEffects();
 
-document.querySelector("#start-computer").addEventListener("click", () => startGame("computer"));
-document.querySelector("#start-local").addEventListener("click", () => startGame("local"));
-elements.continueButton.addEventListener("click", continueGame);
+document.querySelector("#start-computer").addEventListener("click", () => {
+  audio.play("confirm");
+  startGame("computer");
+});
+document.querySelector("#start-local").addEventListener("click", () => {
+  audio.play("confirm");
+  startGame("local");
+});
+elements.continueButton.addEventListener("click", () => {
+  audio.play("confirm");
+  continueGame();
+});
 elements.slash.addEventListener("click", () => selectMirror(Cell.SLASH));
 elements.backslash.addEventListener("click", () => selectMirror(Cell.BACKSLASH));
-document.querySelector("#resume").addEventListener("click", togglePause);
-document.querySelector("#pause-restart").addEventListener("click", restart);
-document.querySelector("#pause-menu").addEventListener("click", returnToMenu);
-document.querySelector("#new-match").addEventListener("click", restart);
-document.querySelector("#main-menu").addEventListener("click", returnToMenu);
-document.querySelector("#play-again").addEventListener("click", restart);
-document.querySelector("#result-menu").addEventListener("click", returnToMenu);
-document.querySelector("#show-rules").addEventListener("click", () => elements.rules.showModal());
+document.querySelector("#resume").addEventListener("click", () => {
+  audio.play("panel");
+  togglePause();
+});
+document.querySelector("#pause-restart").addEventListener("click", () => {
+  audio.play("confirm");
+  restart();
+});
+document.querySelector("#pause-menu").addEventListener("click", () => {
+  audio.play("panel");
+  returnToMenu();
+});
+document.querySelector("#new-match").addEventListener("click", () => {
+  audio.play("confirm");
+  restart();
+});
+document.querySelector("#main-menu").addEventListener("click", () => {
+  audio.play("panel");
+  returnToMenu();
+});
+document.querySelector("#play-again").addEventListener("click", () => {
+  audio.play("confirm");
+  restart();
+});
+document.querySelector("#result-menu").addEventListener("click", () => {
+  audio.play("panel");
+  returnToMenu();
+});
+document.querySelector("#show-rules").addEventListener("click", () => {
+  audio.play("panel");
+  elements.rules.showModal();
+});
 elements.copyLog.addEventListener("click", copyMatchLog);
-elements.sound.addEventListener("click", () => audio.toggle());
+elements.soundButtons.forEach((button) => {
+  button.addEventListener("click", () => audio.toggle());
+});
 document.querySelectorAll("[data-language]").forEach((button) => {
   button.addEventListener("click", () => applyLanguage(button.dataset.language));
 });
+document.querySelectorAll('input[name="difficulty"], input[name="player-side"]').forEach((input) => {
+  input.addEventListener("change", () => audio.play("select"));
+});
+elements.rules.addEventListener("close", () => audio.play("panel"));
 
 document.addEventListener("keydown", (event) => {
   if (elements.rules.open) return;

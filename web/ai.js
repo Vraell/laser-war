@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.2";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.2";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.3";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.3";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,

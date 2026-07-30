@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#0e1215">
     <meta name="description" content="Laser War, a tactical mirror strategy game.">
     <title>Laser War</title>
-    <link rel="icon" href="assets/app-icon.png?v=0.13.2">
-    <link rel="stylesheet" href="styles.css?v=0.13.2">
+    <link rel="icon" href="assets/app-icon.png?v=0.13.3">
+    <link rel="stylesheet" href="styles.css?v=0.13.3">
   </head>
   <body>
     <section class="menu-screen" id="menu-screen">
@@ -51,9 +51,16 @@
         </div>
         <div class="menu-utilities">
           <button class="quiet" id="show-rules" data-i18n="rules">Rules</button>
+          <button class="icon-button sound-toggle" id="menu-sound-toggle" data-sound-toggle aria-label="Mute sound" title="Mute sound">
+            <svg class="sound-glyph" aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+            </svg>
+          </button>
         </div>
       </div>
-      <span class="version">v0.13.2 web</span>
+      <span class="version">v0.13.3 web</span>
     </section>
 
     <main class="game-screen" id="game-screen" hidden>
@@ -102,8 +109,12 @@
           <section class="control-band">
             <p class="eyebrow" data-i18n="mirror">MIRROR</p>
             <div class="mirror-picker" role="group" aria-label="Mirror orientation" data-i18n-aria="mirrorOrientation">
-              <button class="mirror-choice selected" id="select-slash" aria-label="Select slash mirror" data-i18n-aria="selectSlash">/</button>
-              <button class="mirror-choice" id="select-backslash" aria-label="Select backslash mirror" data-i18n-aria="selectBackslash">\</button>
+              <button class="mirror-choice selected" id="select-slash" aria-label="Select slash mirror" aria-pressed="true" data-i18n-aria="selectSlash">
+                <span class="picker-mirror slash" aria-hidden="true"></span>
+              </button>
+              <button class="mirror-choice" id="select-backslash" aria-label="Select backslash mirror" aria-pressed="false" data-i18n-aria="selectBackslash">
+                <span class="picker-mirror backslash" aria-hidden="true"></span>
+              </button>
             </div>
           </section>
 
@@ -123,7 +134,13 @@
           <footer class="match-actions">
             <button id="new-match" data-i18n="newMatch">New Match</button>
             <button id="main-menu" data-i18n="mainMenu">Main Menu</button>
-            <button class="icon-button" id="sound-toggle" aria-label="Toggle sound" title="Toggle sound" data-i18n-title="toggleSound">♪</button>
+            <button class="icon-button sound-toggle" id="sound-toggle" data-sound-toggle aria-label="Mute sound" title="Mute sound">
+              <svg class="sound-glyph" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z"></path>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+            </button>
           </footer>
         </aside>
       </div>
@@ -157,6 +174,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="app.js?v=0.13.2"></script>
+    <script type="module" src="app.js?v=0.13.3"></script>
   </body>
 </html>

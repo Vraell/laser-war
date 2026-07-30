@@ -13,7 +13,8 @@ Features include:
 - selectable Red/first or Blue/second play with a fixed player-facing board perspective;
 - local two-player play;
 - English and French interfaces;
-- animated simultaneous lasers, impacts, sound, and a retained final volley;
+- animated simultaneous lasers, impacts, a multi-cue sound system, and a
+  retained final volley;
 - legal-move feedback and forbidden-square markings;
 - a shared-route anti-fortress rule that keeps both kings and both lasers viable;
 - automatic in-browser match saves and a clipboard-ready match log.

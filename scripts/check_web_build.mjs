@@ -5,6 +5,11 @@ import { basename, dirname, join, resolve } from "node:path";
 const projectRoot = resolve(import.meta.dirname, "..");
 const sourceRoot = join(projectRoot, "web");
 const buildRoot = join(projectRoot, "build", "web");
+const requiredNotices = [
+  "assets/Inter-LICENSE.txt",
+  "assets/logic-solver-LICENSE.txt",
+  "assets/lucide-LICENSE.txt",
+];
 const references = [
   /(?:from\s+|new Worker\()\s*["'](\.\/[^"'?]+)/g,
   /(?:src|href)=["']([^"'?#]+\.(?:js|css|png|webp|ttf))/g,
@@ -28,5 +33,8 @@ for (const filename of readdirSync(sourceRoot)) {
 }
 checkReferences(join(sourceRoot, "index.html"), join(buildRoot, "index.html"));
 checkReferences(join(sourceRoot, "styles.css"), join(buildRoot, "styles.css"));
+for (const filename of requiredNotices) {
+  assert.ok(existsSync(join(buildRoot, filename)), `Build is missing required notice ${filename}`);
+}
 
 console.log("Web deployment artifact is complete.");

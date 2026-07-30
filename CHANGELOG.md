@@ -13,6 +13,63 @@ versions.
 
 No unreleased changes.
 
+## v0.13.3 - 2026-07-29
+
+### Presentation
+
+- Replaced the main-menu backdrop with new cinematic Laser War key art built
+  around the game's kings, shields, mirrors, neutral laser beams, and a more
+  restrained fog-lit tactical-board composition.
+- Rebuilt the mirror selector as a pair of dimensional mirror controls rather
+  than text glyphs. Selection now uses a consistent accent rail and remains
+  immediately visible on touch devices.
+- Tightened the menu, match sidebar, button, status, and result hierarchy across
+  desktop and mobile. Turn ownership now colors a restrained status edge
+  instead of tinting the whole interface.
+- Removed the lingering occupied-cell hover outline. Illegal placements are
+  explained by the existing localized toast without leaving a false board
+  selection behind.
+- Replaced the musical-note sound control with the familiar Lucide volume icon
+  and included its upstream license in the deployment artifact.
+
+### Sound and feedback
+
+- Added a persistent sound control to both the main menu and match screen.
+- Expanded the procedural sound set with distinct cues for selection,
+  confirmation, panel changes, mirror placement, laser travel, shield impact,
+  illegal moves, turn handoff, log copy, victory, defeat, and draws.
+- Differentiated terminal audio so a defeat or draw no longer reuses the victory
+  cue.
+- Added restrained warning and success treatments to transient messages while
+  keeping them clear of the board.
+
+### Validation
+
+- Audited the menu, rules, active match, AI turn, red and blue perspectives,
+  copied logs, illegal moves, saved language and sound preferences, and
+  terminal match state in desktop and mobile browsers.
+- Verified that the final volley remains visible on the result screen and that
+  every board square is locked after the match ends.
+- Passed all 11 automated test suites, the 281-ply tactical corpus, the fixed
+  depth search-speed gate, the staged Pages artifact check, and the full
+  four-difficulty arena.
+
+#### Arena strength
+
+Measured against `v0.13.2` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair). Intervals are 95% paired-bootstrap
+confidence intervals. These are relative Elo changes, not absolute ratings.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 30-4-30 | 0 | 0 to 0 |
+| Medium | 30-4-30 | 0 | 0 to 0 |
+| Hard | 30-4-30 | 0 | 0 to 0 |
+| Ultra | 30-4-30 | 0 | 0 to 0 |
+
+The AI, rules, and move selection are unchanged in this presentation release,
+so the deterministic arena is exactly neutral.
+
 ## v0.13.2 - 2026-07-29
 
 ### Fixed
