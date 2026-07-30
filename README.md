@@ -33,10 +33,11 @@ was removed after ablation testing showed that ordinary search used the same com
 During quiet openings, Ultra varies its play only among moves tied at the deepest completed root score. This
 provides different games without knowingly selecting a lower-evaluated move.
 
-The static evaluation is intentionally small and auditable. It scores remaining king cover, shield shape,
-independent laser reachability, permanent one-king laser assignments, exact per-laser route costs, and current
-king exposure. A simultaneous exposure is neutral because both lasers fire together. Ultra also rejects root
-moves that let the opponent claim a permanent laser assignment when a safe alternative exists.
+The static evaluation is intentionally small and auditable. It scores surviving shield material, permanent
+one-king laser assignments, exact per-laser route costs, and current king exposure. Every shield has the same
+material value because shields occupy fixed positions and never move. A simultaneous exposure is neutral
+because both lasers fire together. Ultra also rejects root moves that let the opponent claim a permanent laser
+assignment when a safe alternative exists.
 
 ## Evaluation Reference
 

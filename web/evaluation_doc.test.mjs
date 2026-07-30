@@ -19,9 +19,6 @@ assert.equal(
 const documentedWeights = {
   mate: "MateScore",
   shieldCount: "ShieldCountWeight",
-  shieldNear: "ShieldNearWeight",
-  shieldFar: "ShieldFarWeight",
-  reachability: "ReachabilityWeight",
   assignment: "AssignmentWeight",
   exposure: "ExposureWeight",
   routeLimit: "RouteLimit",

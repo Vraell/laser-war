@@ -26,13 +26,10 @@
   pdfauthor={Laser War Project}
 }
 
-\newcommand{\GameVersion}{v0.13.4}
+\newcommand{\GameVersion}{v0.13.5}
 \newcommand{\MateScore}{10000}
 \newcommand{\ShieldCountWeight}{25}
-\newcommand{\ShieldNearWeight}{18}
-\newcommand{\ShieldFarWeight}{6}
-\newcommand{\ReachabilityWeight}{18}
-\newcommand{\AssignmentWeight}{1200}
+\newcommand{\AssignmentWeight}{1218}
 \newcommand{\ExposureWeight}{540}
 \newcommand{\RouteLimit}{12}
 \newcommand{\RouteRaceLinear}{67}
@@ -81,8 +78,6 @@ For a non-terminal position, Ultra evaluates
 \[
 E =
 S_{\mathrm{count}}
-+ S_{\mathrm{shape}}
-+ S_{\mathrm{reach}}
 + S_{\mathrm{assign}}
 + S_{\mathrm{route}}
 + S_{\mathrm{exposure}}.
@@ -97,9 +92,7 @@ of view changes with it. This makes the score symmetric between Red and Blue.
 \toprule
 \textbf{Term} & \textbf{Question being asked} & \textbf{Typical scale}\\
 \midrule
-Shield count & Who has more surviving cover near the kings? & tens\\
-Shield shape & Whose remaining cover is closer and more useful? & tens\\
-Reachability & How many lasers can still reach each king? & tens\\
+Shield material & Who has more surviving cover around their king? & tens\\
 Assignment control & Has a laser become permanently committed to one king? & thousands\\
 Route control & Who can complete the important laser routes sooner? & hundreds to thousands\\
 Exposure & Is a king on a live laser path right now? & hundreds\\
@@ -119,11 +112,10 @@ E =
 
 \section*{2. King cover}
 
-\subsection*{2.1 Shield count}
-
-Only shields within a two-square Chebyshev radius of a king count as that
-king's cover. In other words, a shield counts when it lies no more than two
-rows and two columns away.
+Each king begins with six shields in fixed positions: five adjacent shields
+and one outer shield. Shields can be destroyed but never moved or created.
+Consequently, the evaluation treats every surviving shield equally rather
+than pretending that the formation can change shape.
 
 Let \(N_{\mathrm{own}}\) and \(N_{\mathrm{opp}}\) be the surviving shield counts
 around the two kings. Then
@@ -134,40 +126,9 @@ S_{\mathrm{count}}
 
 Each extra nearby shield is therefore worth \(\ShieldCountWeight\) points.
 
-\subsection*{2.2 Shield shape}
+\section*{3. Permanent laser assignment}
 
-Distance matters in addition to quantity. A shield one square from its king is
-worth \(\ShieldNearWeight\) shape points; a shield two squares away is worth
-\(\ShieldFarWeight\). The term is the difference between the two formations:
-\[
-S_{\mathrm{shape}} = Q_{\mathrm{own}}-Q_{\mathrm{opp}}.
-\]
-
-This distinguishes a compact protective formation from the same number of
-shields scattered farther away.
-
-\section*{3. Future reachability}
-
-Imagine that every currently empty legal square may eventually contain either
-mirror orientation. For each of the two lasers, ask which kings remain
-reachable in at least one future arrangement.
-
-Let \(R_{\mathrm{attack}}\) be the number of lasers that can still reach the
-opposing king, and \(R_{\mathrm{danger}}\) the number that can still reach the
-current player's king. Then
-\[
-S_{\mathrm{reach}}
-= \ReachabilityWeight
-\left(R_{\mathrm{attack}}-R_{\mathrm{danger}}\right).
-\]
-
-This is deliberately a modest term. Merely being reachable is less informative
-than knowing how difficult the route is or whether the laser has become
-permanently assigned.
-
-\section*{4. Permanent laser assignment}
-
-This is the decisive strategic feature introduced in \GameVersion.
+This decisive strategic feature was introduced in v0.13.4.
 
 The rules require the two lasers to retain compatible future routes to
 different kings. Suppose one laser can now reach only the Blue king. Because
@@ -194,7 +155,12 @@ The large weight is intentional. A dedicated attack laser is not a small
 positional preference: it permanently defines which side can build with that
 laser and which king must absorb its pressure.
 
-\section*{5. Route control}
+There is no separate reachability-count term. Because the rules require every
+laser to reach at least one king, the difference between the number of lasers
+that can reach each king is exactly \(\sum a_\ell\). Counting both would measure
+the same fact twice.
+
+\section*{4. Route control}
 
 Reachability answers \emph{whether} a route exists. Route control estimates
 \emph{how many new mirrors} are needed to complete it.
@@ -253,7 +219,7 @@ The quickest route measures the immediate race, the second route measures
 resilience, and the per-laser gaps preserve information about which physical
 laser controls each side of the board.
 
-\section*{6. Current laser exposure}
+\section*{5. Current laser exposure}
 
 The board's present laser paths are evaluated after all existing mirrors:
 \[
@@ -270,7 +236,7 @@ Both kings being hit is neutral in this term because the lasers fire
 simultaneously. The actual game result, when a move is resolved, still takes
 priority over every positional score.
 
-\section*{7. Reading a score}
+\section*{6. Reading a score}
 
 \begin{itemize}
   \item A score near zero means the measurable advantages are balanced; it
@@ -293,19 +259,15 @@ priority over every positional score.
   }%
 }
 
-\section*{8. Worked example}
+\section*{7. Worked example}
 
 Consider a position evaluated for Red:
 
 \begin{itemize}
   \item Both sides have four nearby shields, so
   \(S_{\mathrm{count}}=25(4-4)=0\).
-  \item Red's shield shape is worth \(60\) and Blue's is worth \(48\), so
-  \(S_{\mathrm{shape}}=60-48=12\).
-  \item Both lasers can reach Blue, while only one can reach Red, so
-  \(S_{\mathrm{reach}}=18(2-1)=18\).
   \item One laser can reach only Blue and the other still reaches both kings,
-  so \(S_{\mathrm{assign}}=1200(1+0)=1200\).
+  so \(S_{\mathrm{assign}}=1218(1+0)=1218\).
   \item The sorted attack costs are \((2,5)\), the sorted danger costs are
   \((4,7)\), and each physical laser has a control gap of \(2\).
   Consequently,
@@ -323,7 +285,7 @@ Consider a position evaluated for Red:
 
 The complete evaluation is therefore
 \[
-E=0+12+18+1200+466+0=\boxed{1696}.
+E=0+1218+466+0=\boxed{1684}.
 \]
 This is a large Red advantage. Most of it comes from the permanent assignment,
 while the route race confirms that Red is also closer to converting that

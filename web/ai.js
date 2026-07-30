@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.4";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.4";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.5";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.5";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -12,10 +12,7 @@ const MATE_SCORE = 10_000;
 export const EVALUATION_WEIGHTS = Object.freeze({
   mate: MATE_SCORE,
   shieldCount: 25,
-  shieldNear: 18,
-  shieldFar: 6,
-  reachability: 18,
-  assignment: 1_200,
+  assignment: 1_218,
   exposure: 540,
   routeLimit: 12,
   routeRaceLinear: 67,
@@ -206,7 +203,7 @@ export class UltraSearch {
     this.rootSurvivalCache = new Map();
     this.assignmentThreatCache = new Map();
     this.stateKeys = new WeakMap();
-    this.shieldMetricsCache = new WeakMap();
+    this.shieldCountCache = new WeakMap();
     this.bestCompleted = null;
   }
 
@@ -230,7 +227,7 @@ export class UltraSearch {
     this.rootSurvivalCache.clear();
     this.assignmentThreatCache.clear();
     this.stateKeys = new WeakMap();
-    this.shieldMetricsCache = new WeakMap();
+    this.shieldCountCache = new WeakMap();
     this.bestCompleted = null;
   }
 
@@ -740,7 +737,7 @@ export class UltraSearch {
     if (state.draw) return 0;
     if (state.winner === own) return MATE_SCORE;
     if (state.winner === opponent) return -MATE_SCORE;
-    const shields = this.shieldMetrics(state.board);
+    const shields = this.shieldCounts(state.board);
     let hitMask = 0;
     for (const beam of this.game.fireLasers(state.board)) {
       if (beam.hitKing === "top") hitMask |= 1;
@@ -748,7 +745,7 @@ export class UltraSearch {
     }
     const ownMask = own === "top" ? 1 : 2;
     const opponentMask = opponent === "top" ? 1 : 2;
-    return (shields[own].count - shields[opponent].count) * EVALUATION_WEIGHTS.shieldCount
+    return (shields[own] - shields[opponent]) * EVALUATION_WEIGHTS.shieldCount
       + (hitMask & opponentMask ? 300 : 0)
       - (hitMask & ownMask ? 300 : 0);
   }
@@ -858,7 +855,7 @@ export class UltraSearch {
     }
   }
 
-  /** Score shield shape, live beam pressure, and route resilience. */
+  /** Score shield material, live beam pressure, and route resilience. */
   strategicEvaluation(state) {
     const key = this.keyForState(state);
     if (this.evaluationCache.has(key)) return this.evaluationCache.get(key);
@@ -882,31 +879,18 @@ export class UltraSearch {
       return {
         terminal,
         shieldCount: 0,
-        shieldShape: 0,
-        reachability: 0,
         assignmentControl: 0,
         routeControl: 0,
         exposure: 0,
       };
     }
-    const shieldMetrics = this.shieldMetrics(state.board);
+    const shieldCounts = this.shieldCounts(state.board);
     const shieldCount = (
-      shieldMetrics[own].count - shieldMetrics[opponent].count
+      shieldCounts[own] - shieldCounts[opponent]
     ) * EVALUATION_WEIGHTS.shieldCount;
-    const shieldShape = shieldMetrics[own].shape - shieldMetrics[opponent].shape;
 
-    const reachable = this.game.reachableKingMasksByLaser(state.board);
     const attackMask = opponent === "top" ? 1 : 2;
     const exposedMask = own === "top" ? 1 : 2;
-    let attackRoutes = 0;
-    let exposedRoutes = 0;
-    for (const mask of reachable) {
-      if (mask & attackMask) attackRoutes += 1;
-      if (mask & exposedMask) exposedRoutes += 1;
-    }
-    const reachability = (
-      attackRoutes - exposedRoutes
-    ) * EVALUATION_WEIGHTS.reachability;
     const assignmentControl = (
       this.assignmentControl(state) * EVALUATION_WEIGHTS.assignment
     );
@@ -924,8 +908,6 @@ export class UltraSearch {
     return {
       terminal,
       shieldCount,
-      shieldShape,
-      reachability,
       assignmentControl,
       routeControl,
       exposure,
@@ -948,36 +930,29 @@ export class UltraSearch {
   shieldExchange(state, child) {
     const own = state.turn;
     const opponent = own === "top" ? "bottom" : "top";
-    const before = this.shieldMetrics(state.board);
-    const after = this.shieldMetrics(child.board);
-    const ownLost = before[own].count - after[own].count;
-    const opponentLost = before[opponent].count - after[opponent].count;
+    const before = this.shieldCounts(state.board);
+    const after = this.shieldCounts(child.board);
+    const ownLost = before[own] - after[own];
+    const opponentLost = before[opponent] - after[opponent];
     return opponentLost - ownLost;
   }
 
-  /** Cache shield count and distance-weighted shape for both fixed kings. */
-  shieldMetrics(board) {
-    let metrics = this.shieldMetricsCache.get(board);
-    if (metrics) return metrics;
-    metrics = {
-      top: { count: 0, shape: 0 },
-      bottom: { count: 0, shape: 0 },
-    };
+  /** Count the surviving shields belonging to each fixed king enclosure. */
+  shieldCounts(board) {
+    let counts = this.shieldCountCache.get(board);
+    if (counts) return counts;
+    counts = { top: 0, bottom: 0 };
     for (let row = 0; row < BOARD_SIZE; row += 1) {
       for (let col = 0; col < BOARD_SIZE; col += 1) {
         if (board[row][col] !== Cell.SHIELD) continue;
         const topDistance = Math.max(row, Math.abs(col - 4));
         const bottomDistance = Math.max(BOARD_SIZE - 1 - row, Math.abs(col - 4));
-        if (topDistance <= 2) metrics.top.count += 1;
-        if (bottomDistance <= 2) metrics.bottom.count += 1;
-        if (topDistance === 1) metrics.top.shape += EVALUATION_WEIGHTS.shieldNear;
-        else if (topDistance === 2) metrics.top.shape += EVALUATION_WEIGHTS.shieldFar;
-        if (bottomDistance === 1) metrics.bottom.shape += EVALUATION_WEIGHTS.shieldNear;
-        else if (bottomDistance === 2) metrics.bottom.shape += EVALUATION_WEIGHTS.shieldFar;
+        if (topDistance <= 2) counts.top += 1;
+        if (bottomDistance <= 2) counts.bottom += 1;
       }
     }
-    this.shieldMetricsCache.set(board, metrics);
-    return metrics;
+    this.shieldCountCache.set(board, counts);
+    return counts;
   }
 
   /** Return a stable serialized key for an immutable search state. */

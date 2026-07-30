@@ -13,6 +13,63 @@ versions.
 
 No unreleased changes.
 
+## v0.13.5 - 2026-07-30
+
+### Evaluation cleanup
+
+- Removed the shield-shape term. Shields never move, so the term was only a
+  second material count that valued five fixed adjacent shields at 43 points
+  and the one fixed outer shield at 31. Across all possible shield subsets it
+  correlated `0.963` with shield count.
+- Retained a single, explicit shield-material value of 25 points per surviving
+  shield. A 64-game ablation made removing shape exactly neutral at `31-2-31`,
+  while removing shield material scored `17-4-43`, approximately `-150 Elo`.
+- Merged reachability count into permanent assignment control. Under the rules
+  every laser must reach at least one king, making the two terms algebraically
+  identical. The unified assignment weight is `1218`, preserving the former
+  `1200 + 18` score exactly.
+- Verified the merge against 316 replayed positions with zero score
+  differences.
+
+### Weight audit
+
+- Screened lower and higher values for shield material, assignment control,
+  exposure, and every route-pressure coefficient, followed by zero-versus-
+  double feature ablations on fresh seeded openings.
+- Lower shield values were consistently harmful; higher values produced no
+  improvement. Assignment and exposure changes remained on a broad neutral
+  plateau in the screened games.
+- Removing route pressure appeared to gain about `+44 Elo` in the first
+  32-game sample, then scored about `-11 Elo` over 64 fresh games. Intermediate
+  route scales were neutral or negative, so the apparent gain was rejected as
+  sample noise and the established route weights were retained.
+- No tested weight change demonstrated a repeatable Elo improvement. This
+  release removes only redundant terms and preserves the proven evaluation.
+
+### Documentation and validation
+
+- Updated the LaTeX and PDF evaluation reference to describe the four actual
+  positional terms: shield material, assignment control, route control, and
+  current exposure.
+- Passed all 12 automated test suites, the 307-ply tactical corpus, exact-route
+  regressions, fixed-depth speed non-regression, and the staged Pages artifact
+  check.
+
+#### Arena strength
+
+Measured against `v0.13.4` over 32 paired openings per difficulty (64 games
+each, colors swapped within every pair). The simplification is behaviorally
+identical on the full release arena.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 30-4-30 | 0 | 0 to 0 |
+| Medium | 30-4-30 | 0 | 0 to 0 |
+| Hard | 30-4-30 | 0 | 0 to 0 |
+| Ultra | 31-2-31 | 0 | 0 to 0 |
+
+Ultra averaged 16.5 ms per move versus 16.6 ms for `v0.13.4`.
+
 ## v0.13.4 - 2026-07-30
 
 ### Ultra AI
