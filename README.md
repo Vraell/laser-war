@@ -37,6 +37,12 @@ independent laser reachability, exact per-laser route costs, and current king ex
 is neutral because both lasers fire together. Extra fixed-target and broad root heuristics were tested and
 rejected when paired games showed that they duplicated route pressure or reduced playing strength.
 
+## Release History
+
+See [CHANGELOG.md](CHANGELOG.md) for semi-detailed patch notes from the first playable build through the current
+release. Early entries are reconstructed from Git history, and future work is recorded under `Unreleased` before
+shipping.
+
 ## Development
 
 The application is static HTML, CSS, and JavaScript. No package installation or compilation is required.
