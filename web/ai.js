@@ -1,11 +1,12 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.19";
-import { TacticalProofSearch } from "./tactics.js?v=0.11.19";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.12.0";
+import { TacticalProofSearch } from "./tactics.js?v=0.12.0";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
   maxDepth: 12,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
+  proofMaxNodes: 0,
 };
 const MATE_SCORE = 10_000;
 
@@ -13,10 +14,6 @@ class SearchInterrupted extends Error {}
 
 function moveKey(move) {
   return ((move.row * BOARD_SIZE + move.col) * 2) + Number(move.mirror === Cell.BACKSLASH);
-}
-
-function stateKey(state) {
-  return `${state.turn}|${state.winner || ""}|${state.draw ? 1 : 0}|${state.board.map((row) => row.join("")).join("")}`;
 }
 
 function scoreForTop(game, state) {
@@ -190,6 +187,7 @@ export class UltraSearch {
 
   /** Choose a move with iterative deepening under the Ultra budget. */
   choose(state) {
+    this.cache.clear();
     const started = this.now();
     this.deadline = started + Math.max(50, this.profile.timeLimit - 150);
     const timing = this.softTiming(state, started);
@@ -208,7 +206,9 @@ export class UltraSearch {
         elapsed: this.now() - started,
       };
     }
-    const proofMaxNodes = this.profile.proofMaxNodes ?? 5000;
+    const proofMaxNodes = timing.latePosition || this.isTacticalPosition(state)
+      ? this.profile.proofMaxNodes ?? 5000
+      : 0;
     const proofDeadline = Math.min(
       this.deadline,
       started + Math.min(1000, this.profile.timeLimit * 0.1),
@@ -381,9 +381,19 @@ export class UltraSearch {
       ));
     }
     const ranked = [];
+    let firstChild = true;
     for (const { move, state: child } of children) {
       this.checkInterrupted();
-      const score = -this.negamax(child, depth - 1, -beta, -alpha, 1);
+      let score;
+      if (firstChild) {
+        score = -this.negamax(child, depth - 1, -beta, -alpha, 1);
+        firstChild = false;
+      } else {
+        score = -this.negamax(child, depth - 1, -alpha - 1, -alpha, 1);
+        if (score > alpha && score < beta) {
+          score = -this.negamax(child, depth - 1, -beta, -alpha, 1);
+        }
+      }
       ranked.push({ move, state: child, score });
       if (score > alpha && this.strictChild(state, move, child, false)) alpha = score;
     }
@@ -480,7 +490,15 @@ export class UltraSearch {
     let value = -Infinity;
     let bestMove = null;
     for (const { move, state: child } of children) {
-      const score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+      let score;
+      if (bestMove === null) {
+        score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+      } else {
+        score = -this.negamax(child, depth - 1, -alpha - 1, -alpha, ply + 1);
+        if (score > alpha && score < beta) {
+          score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+        }
+      }
       if (score > value) {
         value = score;
         bestMove = move;
@@ -824,7 +842,7 @@ export class UltraSearch {
   keyForState(state) {
     let key = this.stateKeys.get(state);
     if (!key) {
-      key = stateKey(state);
+      key = `${state.turn}|${state.winner || ""}|${state.draw ? 1 : 0}|${this.game.boardKey(state.board)}`;
       this.stateKeys.set(state, key);
     }
     return key;

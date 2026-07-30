@@ -154,6 +154,18 @@ const protectedState = game.initialState("top");
 const pressureSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const protectedScore = pressureSearch.strategicEvaluation(protectedState);
 const protectedComponents = pressureSearch.strategicEvaluationComponents(protectedState);
+assert.deepEqual(pressureSearch.shieldMetrics(protectedState.board), {
+  top: { count: 6, shape: 96 },
+  bottom: { count: 6, shape: 96 },
+});
+assert.equal(
+  pressureSearch.shieldMetrics(protectedState.board).top.count,
+  game.nearbyShields(protectedState.board, "k"),
+);
+assert.equal(
+  pressureSearch.shieldMetrics(protectedState.board).bottom.count,
+  game.nearbyShields(protectedState.board, "K"),
+);
 assert.equal(
   Object.values(protectedComponents).reduce((total, value) => total + value, 0),
   protectedScore,

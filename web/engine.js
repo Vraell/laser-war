@@ -1,4 +1,4 @@
-import { exactJointPathWitness } from "./exact_routes.js?v=0.11.19";
+import { exactJointPathWitness } from "./exact_routes.js?v=0.12.0";
 
 export const BOARD_SIZE = 9;
 export const MIDDLE_ROW = 4;
@@ -771,8 +771,8 @@ export class Game {
     const opponentKing = state.turn === "bottom" ? Cell.TOP_KING : Cell.BOTTOM_KING;
     let score = (this.nearbyShields(state.board, ownKing) - this.nearbyShields(state.board, opponentKing)) * 25;
     const threatened = new Set(this.fireLasers(state.board).map((beam) => beam.hitKing).filter(Boolean));
-    if (threatened.has(state.turn) && threatened.has(TURNS[state.turn])) score += 150;
-    else if (threatened.has(TURNS[state.turn])) score += 300;
+    if (threatened.has(state.turn) && threatened.has(TURNS[state.turn])) return score;
+    if (threatened.has(TURNS[state.turn])) score += 300;
     else if (threatened.has(state.turn)) score -= 300;
     return score;
   }

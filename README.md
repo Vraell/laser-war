@@ -20,36 +20,54 @@ Features include:
 Ultra unlocks after defeating Hard. Progress and the current match are stored locally in the browser and
 survive game updates.
 
-Ultra uses iterative deepening with threat-aware root coverage and wider reply sampling in developed positions.
-Its Web Worker and search tables persist for the match, allowing later turns to reuse explored continuations
-instead of restarting from an empty tree. Every move that can alter the live laser volley is searched alongside
-the strongest quiet candidates, so tactical defenses cannot disappear behind a positional shortlist. Quiet turns
-retain short think targets, while unstable score swings and developed 23-mirror positions unlock the remaining
-six-second tactical budget.
+Ultra combines iterative deepening, alpha-beta principal-variation search, transposition bounds, history and
+killer ordering, and a selective tactical extension. It checks every legal mate-in-one before pruning the root,
+and every move that can alter the current laser volley is searched alongside the strongest quiet candidates, so
+tactical defenses do not disappear behind a positional shortlist. Quiet turns target four seconds; developed or
+unstable positions can progressively use six, eight, or at most ten seconds. Search runs in a Web Worker and
+keeps move-ordering knowledge across turns without freezing the interface. A separate proof-number-style solver
+certifies short forcing lines in offline analysis and tactical regression tests; an always-on production prepass
+was removed after ablation testing showed that ordinary search used the same compute more effectively.
+
+The static evaluation is intentionally small and auditable. It scores remaining king cover, shield shape,
+independent laser reachability, exact per-laser route costs, and current king exposure. A simultaneous exposure
+is neutral because both lasers fire together. Extra fixed-target and broad root heuristics were tested and
+rejected when paired games showed that they duplicated route pressure or reduced playing strength.
 
 ## Development
 
 The application is static HTML, CSS, and JavaScript. No package installation or compilation is required.
 
-Run all tests:
+Run all tests and tactical regressions:
 
 ```bash
-node --test web/*.test.mjs
+node --test web/*.test.mjs scripts/arena_stats.test.mjs
+node scripts/tactical_benchmark.mjs
 ```
 
-Compare every difficulty against the previous AI revision with paired, color-swapped games:
+Check fixed-depth search throughput against a Git revision:
 
 ```bash
-node scripts/elo_benchmark.mjs --pairs 12 --baseline-ref HEAD
+node scripts/search_benchmark.mjs HEAD --gate=nonregression
 ```
 
-The arena reports win/draw/loss results, estimated Elo change with a 95% interval, illegal moves, and average
-search time. The Pages workflow runs a bounded arena before every deployment and rejects statistically supported
-strength regressions. Reported tactical failures should also become position fixtures in `web/fixtures/` with a
-targeted assertion in `web/ultra.test.mjs`; Elo testing and position regressions cover different failure modes.
-Use `--difficulties ultra`, `--opening-plies 4`, and `--seed-offset N` for faster focused runs and independent
-opening samples. `--ultra-time 1000` raises the arena's default compressed 300 ms Ultra budget for a more
-production-like strength check.
+Compare every difficulty against a previous AI revision with paired, color-swapped games:
+
+```bash
+node scripts/elo_benchmark.mjs \
+  --pairs 32 \
+  --baseline-ref HEAD \
+  --opening-plies 0,2,4,6,8,10
+```
+
+The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
+results, estimated Elo with a paired bootstrap 95% interval, illegal moves, and average search time. Search
+errors count as losses instead of aborting the evidence run. Ultra receives a deterministic virtual computation
+budget, so machine load cannot change the completed search depth; real wall time is still reported separately.
+The Pages workflow gates every deployment on unit tests, the tactical corpus, search-speed non-regression, and
+32 paired Ultra games. Reported failures should also become fixtures in `web/fixtures/`; deterministic tactical
+tests and statistical match tests cover different failure modes. Use `--difficulties ultra`, `--seed-offset N`,
+and `--ultra-time 1000` for focused or larger-node-budget runs.
 
 Analyze a copied English or French match log with a wider offline Ultra search:
 

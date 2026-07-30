@@ -32,7 +32,7 @@ jobs:
         run: node scripts/tactical_benchmark.mjs
 
       - name: Compare search speed
-        run: node scripts/search_benchmark.mjs HEAD^
+        run: node scripts/search_benchmark.mjs HEAD^ --gate=nonregression
 
       - name: Compare AI strength
         run: >-

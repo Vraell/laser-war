@@ -9,6 +9,11 @@ const initial = game.initialState();
 
 assert.equal(initial.board[0][4], Cell.TOP_KING);
 assert.equal(initial.board[8][4], Cell.BOTTOM_KING);
+const mutuallyExposed = game.initialState("top");
+mutuallyExposed.board = Array.from({ length: 9 }, () => Array(9).fill(Cell.EMPTY));
+mutuallyExposed.board[4][2] = Cell.TOP_KING;
+mutuallyExposed.board[4][6] = Cell.BOTTOM_KING;
+assert.equal(game.evaluate(mutuallyExposed), 0);
 assert.equal(game.legalMoves(initial).length, 130);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 0, mirror: Cell.SLASH }), false);
 assert.equal(game.isLegalMove(initial, { row: 4, col: 8, mirror: Cell.BACKSLASH }), false);

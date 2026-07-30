@@ -1,4 +1,4 @@
-import MiniSat from "./minisat.js?v=0.11.19";
+import MiniSat from "./minisat.js?v=0.12.0";
 
 const BOARD_SIZE = 9;
 const EMPTY = ".";

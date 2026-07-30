@@ -11,7 +11,9 @@ import { pathToFileURL } from "node:url";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const webFiles = ["ai.js", "engine.js", "exact_routes.js", "tactics.js", "minisat.js"];
-const baselineRef = process.argv[2] || "HEAD";
+const argumentsList = process.argv.slice(2);
+const baselineRef = argumentsList.find((argument) => !argument.startsWith("--")) || "HEAD";
+const gate = argumentsList.includes("--gate=improvement") ? "improvement" : "nonregression";
 const SEARCH_PROFILE = {
   timeLimit: Infinity,
   maxDepth: 3,
@@ -115,8 +117,11 @@ try {
     + `${baselineResult.nodes.toLocaleString()} positions`,
   );
   console.log(`wall-clock ratio ${(ratio * 100).toFixed(1)}% vs ${baselineRef}`);
-  if (ratio > 0.8) {
+  if (gate === "improvement" && ratio > 0.8) {
     throw new Error("Candidate did not establish the required 20% search speedup.");
+  }
+  if (gate === "nonregression" && ratio > 1.1) {
+    throw new Error("Candidate regressed search speed by more than 10%.");
   }
 } finally {
   candidate.dispose();

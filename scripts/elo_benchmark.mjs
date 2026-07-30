@@ -130,12 +130,11 @@ function rotateMove(move) {
 function chooseMove(revision, player, difficulty, game, state, random) {
   const normalized = state.turn === "top" ? state : stateFromTopPerspective(state);
   let clock = 0;
-  globalThis.__laserWarArenaNow = difficulty === "ultra"
-    ? () => performance.now()
-    : () => {
-      clock += 5;
-      return clock;
-    };
+  const clockTick = difficulty === "ultra" ? 0.1 : 5;
+  globalThis.__laserWarArenaNow = () => {
+    clock += clockTick;
+    return clock;
+  };
   const started = process.hrtime.bigint();
   const result = player
     ? player(normalized, difficulty, { random, now: globalThis.__laserWarArenaNow })
