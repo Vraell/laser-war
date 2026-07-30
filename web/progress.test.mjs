@@ -29,6 +29,13 @@ assert.equal(recordResult(progress, { mode: "computer", difficulty: "medium", wi
 assert.equal(recordResult(progress, { mode: "computer", difficulty: "hard", winner: "top" }), false);
 assert.equal(recordResult(progress, { mode: "computer", difficulty: "hard", winner: "bottom" }), true);
 assert.equal(progress.ultraUnlocked, true);
+const blueProgress = { ultraUnlocked: false };
+assert.equal(recordResult(blueProgress, {
+  mode: "computer",
+  difficulty: "hard",
+  winner: "top",
+  humanSide: "top",
+}), true);
 saveProgress(storage, progress);
 assert.equal(loadProgress(storage).ultraUnlocked, true);
 storage.setItem("laser-war.progress.v1", JSON.stringify({ version: 999, ultraUnlocked: true }));

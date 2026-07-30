@@ -10,6 +10,7 @@ and works on desktop and mobile browsers.
 Features include:
 
 - Easy, Medium, Hard, and unlockable Ultra computer opponents;
+- selectable Red/first or Blue/second play with a fixed player-facing board perspective;
 - local two-player play;
 - English and French interfaces;
 - animated simultaneous lasers, impacts, sound, and a retained final volley;
@@ -28,6 +29,8 @@ unstable positions can progressively use six, eight, or at most ten seconds. Sea
 keeps move-ordering knowledge across turns without freezing the interface. A separate proof-number-style solver
 certifies short forcing lines in offline analysis and tactical regression tests; an always-on production prepass
 was removed after ablation testing showed that ordinary search used the same compute more effectively.
+During quiet openings, Ultra varies its play only among moves tied at the deepest completed root score. This
+provides different games without knowingly selecting a lower-evaluated move.
 
 The static evaluation is intentionally small and auditable. It scores remaining king cover, shield shape,
 independent laser reachability, exact per-laser route costs, and current king exposure. A simultaneous exposure

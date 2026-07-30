@@ -32,9 +32,19 @@ export function recoverUltraProgress(progress, activeSave) {
   return true;
 }
 
-/** Unlock Ultra after the first qualifying Hard-mode victory. */
-export function recordResult(progress, { mode, difficulty, winner }) {
-  if (progress.ultraUnlocked || mode !== "computer" || difficulty !== "hard" || winner !== "bottom") {
+/** Unlock Ultra after the first qualifying Hard-mode victory on either side. */
+export function recordResult(progress, {
+  mode,
+  difficulty,
+  winner,
+  humanSide = "bottom",
+}) {
+  if (
+    progress.ultraUnlocked
+    || mode !== "computer"
+    || difficulty !== "hard"
+    || winner !== humanSide
+  ) {
     return false;
   }
   progress.ultraUnlocked = true;

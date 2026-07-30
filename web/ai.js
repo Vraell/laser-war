@@ -1,5 +1,5 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.12.0";
-import { TacticalProofSearch } from "./tactics.js?v=0.12.0";
+import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.0";
+import { TacticalProofSearch } from "./tactics.js?v=0.13.0";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -311,7 +311,7 @@ export class UltraSearch {
     };
   }
 
-  /** Add restrained variety among near-equal quiet opening choices. */
+  /** Randomize only among exactly tied quiet opening choices. */
   openingVariation(state, rootKey, bestMove, bestScore, timing) {
     const mirrors = state.board.flat().filter(
       (cell) => [Cell.SLASH, Cell.BACKSLASH].includes(cell),
@@ -323,7 +323,7 @@ export class UltraSearch {
       .filter(({ move, state: child }) => {
         const score = scores.get(moveKey(move));
         return score !== undefined
-          && score >= bestScore - 20
+          && score === bestScore
           && child.winner !== (state.turn === "top" ? "bottom" : "top")
           && this.strictChild(state, move, child);
       });
@@ -893,7 +893,7 @@ export function chooseComputerMove(game, state, difficulty = "medium", options =
   const random = options.random || Math.random;
   const now = options.now || (() => performance.now());
   return difficulty === "ultra"
-    ? new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress).choose(state)
+    ? new UltraSearch(game, now, ULTRA_PROFILE, options.onProgress, random).choose(state)
     : standardMove(game, state, difficulty, random);
 }
 

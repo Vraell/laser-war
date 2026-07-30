@@ -1,22 +1,30 @@
-import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.12.0";
+import { BOARD_SIZE, MIDDLE_ROW, Cell, Game, cloneState } from "./engine.js?v=0.13.0";
 import {
   SAVE_VERSION,
   buildActiveSave,
   createMatchId,
   legacyMatchId,
-} from "./save.js?v=0.12.0";
+} from "./save.js?v=0.13.0";
 import {
   loadProgress,
   recordResult,
   recoverUltraProgress,
   saveProgress,
-} from "./progress.js?v=0.12.0";
-import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.12.0";
-import { beamPoints } from "./beam.js?v=0.12.0";
-import { drawDetailKey } from "./result.js?v=0.12.0";
+} from "./progress.js?v=0.13.0";
+import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.13.0";
+import { beamPoints } from "./beam.js?v=0.13.0";
+import { drawDetailKey } from "./result.js?v=0.13.0";
+import {
+  BLUE_SIDE,
+  RED_SIDE,
+  displayPoint,
+  logicalSquare,
+  opposingSide,
+  perspectiveLabels,
+} from "./perspective.js?v=0.13.0";
 
 const SAVE_KEY = "laser-war.web.v1";
-const GAME_VERSION = "v0.12.0";
+const GAME_VERSION = "v0.13.0";
 const BEAM_VISIBLE_MS = 920;
 const game = new Game();
 
@@ -74,6 +82,22 @@ function difficultyName(difficulty) {
   return t(difficulty);
 }
 
+function sideName(side) {
+  return t(side);
+}
+
+function sideColor(side) {
+  return side === RED_SIDE ? "var(--player-red)" : "var(--player-blue)";
+}
+
+function canHumanAct() {
+  return humanTurn()
+    && !inputLocked
+    && !paused
+    && !session.state.winner
+    && !session.state.draw;
+}
+
 function moveCount(count) {
   return `${count} ${t(count === 1 ? "move" : "moves")}`;
 }
@@ -89,7 +113,11 @@ function matchDate() {
 /** Name both participants, including the selected computer difficulty. */
 function matchupLabel() {
   if (session.mode === "computer") {
-    return t("computerMatchup", { difficulty: difficultyName(session.difficulty) });
+    return t("computerMatchup", {
+      difficulty: difficultyName(session.difficulty),
+      human: sideName(session.humanSide),
+      computer: sideName(opposingSide(session.humanSide)),
+    });
   }
   return t("localMatchup");
 }
@@ -106,6 +134,7 @@ function createSession(
   id = createMatchId(),
   startedAt = new Date().toISOString(),
   gameVersion = GAME_VERSION,
+  humanSide = RED_SIDE,
 ) {
   return {
     id,
@@ -113,9 +142,9 @@ function createSession(
     gameVersion,
     mode,
     difficulty,
+    humanSide,
     state: game.initialState(),
     history: [],
-    redo: [],
   };
 }
 
@@ -124,12 +153,12 @@ function moveKey(move) {
 }
 
 function humanTurn() {
-  return session.mode === "local" || session.state.turn === "bottom";
+  return session.mode === "local" || session.state.turn === session.humanSide;
 }
 
 function computerTurn() {
   return session.mode === "computer"
-    && session.state.turn === "top"
+    && session.state.turn === opposingSide(session.humanSide)
     && !session.state.winner
     && !session.state.draw;
 }
@@ -140,15 +169,35 @@ function currentDifficulty() {
   return selected === "ultra" && !progress.ultraUnlocked ? "hard" : selected;
 }
 
+/** Read the side selected for a new single-player match. */
+function currentHumanSide() {
+  return document.querySelector('input[name="player-side"]:checked')?.value === BLUE_SIDE
+    ? BLUE_SIDE
+    : RED_SIDE;
+}
+
 /** Replace the active session with a fresh match and optionally persist it. */
-function startGame(mode, difficulty = currentDifficulty(), persist = true) {
+function startGame(
+  mode,
+  difficulty = currentDifficulty(),
+  persist = true,
+  humanSide = mode === "computer" ? currentHumanSide() : RED_SIDE,
+) {
   cancelComputerTurn();
-  session = createSession(mode, difficulty);
+  session = createSession(
+    mode,
+    difficulty,
+    createMatchId(),
+    new Date().toISOString(),
+    GAME_VERSION,
+    humanSide,
+  );
   lastOutcome = null;
   ultraUnlockedThisMatch = false;
   pendingShieldImpacts = new Set();
   startGameView();
   if (persist) saveGame();
+  if (computerTurn()) beginComputerTurn();
 }
 
 /** Resolve, record, animate, and save one player or computer move. */
@@ -173,7 +222,6 @@ function playMove(move, actor) {
     outcome,
   };
   session.history.push(record);
-  session.redo = [];
   lastOutcome = outcome;
   pendingShieldImpacts = new Set(
     outcome.destroyed.map(([row, col]) => `${row},${col}`),
@@ -206,8 +254,8 @@ function beginComputerTurn() {
   cancelComputerTurn(true, false);
   inputLocked = true;
   elements.status.textContent = t("computerThinking");
-  elements.statusLight.style.background = "var(--player-blue)";
-  elements.statusLight.style.color = "var(--player-blue)";
+  elements.statusLight.style.background = sideColor(opposingSide(session.humanSide));
+  elements.statusLight.style.color = sideColor(opposingSide(session.humanSide));
   elements.aiDetail.classList.add("thinking");
   const started = performance.now();
   const difficulty = session.difficulty;
@@ -222,7 +270,7 @@ function beginComputerTurn() {
 
   const requestId = ++aiRequestId;
   if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.12.0", { type: "module" });
+    aiWorker = new Worker("./ai_worker.js?v=0.13.0", { type: "module" });
     aiWorker.addEventListener("message", ({ data }) => {
       if (data.requestId !== aiRequestId) return;
       if (data.type === "progress") {
@@ -317,6 +365,25 @@ function render() {
 function renderMirrorSelection() {
   elements.slash.classList.toggle("selected", selectedMirror === Cell.SLASH);
   elements.backslash.classList.toggle("selected", selectedMirror === Cell.BACKSLASH);
+  elements.slash.disabled = !canHumanAct();
+  elements.backslash.disabled = !canHumanAct();
+}
+
+/** Render numeric coordinates in the player's fixed board perspective. */
+function renderBoardLabels() {
+  const labels = perspectiveLabels(session.humanSide, BOARD_SIZE);
+  const columns = document.querySelector("#column-labels");
+  const rows = document.querySelector("#row-labels");
+  columns.replaceChildren(...labels.map((label) => {
+    const element = document.createElement("span");
+    element.textContent = String(label);
+    return element;
+  }));
+  rows.replaceChildren(...labels.map((label) => {
+    const element = document.createElement("span");
+    element.textContent = String(label);
+    return element;
+  }));
 }
 
 /** Render all board cells with legal, explanatory, and terminal input states. */
@@ -325,26 +392,28 @@ function renderBoard() {
   const forbidden = game.mirrorForbiddenSquares(session.state.board);
   const latestMove = session.history.at(-1)?.move;
   const mirrorOwners = new Map(
-    session.history.map((record, index) => [
+    session.history.map((record) => [
       `${record.move.row},${record.move.col}`,
-      index % 2 === 0 ? "red" : "blue",
+      record.before.turn === RED_SIDE ? "red" : "blue",
     ]),
   );
   elements.board.replaceChildren();
 
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let displayRow = 0; displayRow < BOARD_SIZE; displayRow += 1) {
+    for (let displayCol = 0; displayCol < BOARD_SIZE; displayCol += 1) {
+      const [row, col] = logicalSquare(
+        displayRow,
+        displayCol,
+        session.humanSide,
+        BOARD_SIZE,
+      );
       const cell = document.createElement("button");
       const value = pendingShieldImpacts.has(`${row},${col}`)
         ? Cell.SHIELD
         : session.state.board[row][col];
       const move = { row, col, mirror: selectedMirror };
       const moveIsLegal = legal.has(moveKey(move));
-      const canAct = humanTurn()
-        && !inputLocked
-        && !paused
-        && !session.state.winner
-        && !session.state.draw;
+      const canAct = canHumanAct();
       const explainable = canAct && !moveIsLegal;
       cell.className = "cell";
       cell.dataset.row = String(row);
@@ -426,19 +495,19 @@ function renderStatus() {
   let color = "var(--player-red)";
   if (session.state.winner) {
     text = t("sideWins", { side: t(session.state.winner) });
-    color = session.state.winner === "bottom" ? "var(--player-red)" : "var(--player-blue)";
+    color = sideColor(session.state.winner);
   } else if (session.state.draw) {
     text = t("draw");
     color = "var(--muted)";
   } else if (inputLocked && computerTurn()) {
     text = t("computerThinking");
-    color = "var(--player-blue)";
+    color = sideColor(opposingSide(session.humanSide));
   } else if (session.mode === "computer") {
-    text = session.state.turn === "bottom" ? t("yourTurn") : t("computerTurn");
-    color = session.state.turn === "bottom" ? "var(--player-red)" : "var(--player-blue)";
+    text = humanTurn() ? t("yourTurn") : t("computerTurn");
+    color = sideColor(session.state.turn);
   } else {
     text = t("sideToMove", { side: t(session.state.turn) });
-    color = session.state.turn === "bottom" ? "var(--player-red)" : "var(--player-blue)";
+    color = sideColor(session.state.turn);
   }
   elements.status.textContent = text;
   elements.statusLight.style.background = color;
@@ -508,7 +577,9 @@ function actorLabel(actor) {
 function renderBeams(beams) {
   clearBeams();
   beams.forEach((beam, index) => {
-    const points = beamPoints(beam, index);
+    const points = beamPoints(beam, index).map(
+      (point) => displayPoint(point, session.humanSide),
+    );
     const pointString = points.map((point) => point.join(",")).join(" ");
     const color = "var(--laser)";
     for (const className of ["beam-glow", "beam-core", "beam-flow"]) {
@@ -521,9 +592,13 @@ function renderBeams(beams) {
     }
     if (beam.hitShield) {
       const [row, col] = beam.hitShield;
+      const [impactX, impactY] = displayPoint(
+        [col * 100 + 50, row * 100 + 50],
+        session.humanSide,
+      );
       const impact = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      impact.setAttribute("cx", String(col * 100 + 50));
-      impact.setAttribute("cy", String(row * 100 + 50));
+      impact.setAttribute("cx", String(impactX));
+      impact.setAttribute("cy", String(impactY));
       impact.setAttribute("r", "14");
       impact.setAttribute("class", "beam-impact");
       impact.style.setProperty("--beam-color", color);
@@ -544,6 +619,7 @@ function showResult(playSound = true) {
       mode: session.mode,
       difficulty: session.difficulty,
       winner: session.state.winner,
+      humanSide: session.humanSide,
     })
   ) {
     ultraUnlockedThisMatch = true;
@@ -560,9 +636,9 @@ function showResult(playSound = true) {
       { count: moveCount(session.history.length) },
     );
   } else if (session.mode === "computer") {
-    const victory = session.state.winner === "bottom";
+    const victory = session.state.winner === session.humanSide;
     elements.resultTitle.textContent = victory ? t("victory") : t("defeat");
-    elements.resultTitle.style.color = victory ? "var(--player-red)" : "var(--player-blue)";
+    elements.resultTitle.style.color = sideColor(session.state.winner);
     elements.resultDetail.textContent = ultraUnlockedThisMatch
       ? t("ultraUnlocked")
       : t("resultDetail", {
@@ -571,68 +647,14 @@ function showResult(playSound = true) {
       });
   } else {
     elements.resultTitle.textContent = t("sideWins", { side: t(session.state.winner) }).toUpperCase();
-    elements.resultTitle.style.color = session.state.winner === "bottom"
-      ? "var(--player-red)"
-      : "var(--player-blue)";
+    elements.resultTitle.style.color = sideColor(session.state.winner);
     elements.resultDetail.textContent = moveCount(session.history.length);
   }
   if (playSound) audio.play("victory");
 }
 
-/** Undo exactly one move and refresh all derived state. */
-function undo() {
-  if (inputLocked || !session.history.length) return;
-  cancelComputerTurn();
-  const record = session.history.pop();
-  session.redo.push(record);
-  session.state = cloneState(record.before);
-  lastOutcome = null;
-  elements.resultOverlay.hidden = true;
-  elements.gameScreen.classList.remove("match-complete");
-  clearBeams();
-  refreshLegalMoves();
-  render();
-  saveGame();
-  audio.play("undo");
-}
-
-/** Revalidate and restore exactly one previously undone move. */
-function redo() {
-  if (inputLocked || !session.redo.length) return;
-  cancelComputerTurn();
-  const old = session.redo.pop();
-  let outcome;
-  try {
-    outcome = game.resolveMove(session.state, old.move);
-  } catch {
-    showToast(t("redoFailed"));
-    session.redo.push(old);
-    return;
-  }
-  const record = {
-    number: session.history.length + 1,
-    actor: old.actor,
-    move: { ...old.move },
-    before: cloneState(session.state),
-    after: cloneState(outcome.state),
-    outcome,
-  };
-  session.history.push(record);
-  session.state = outcome.state;
-  lastOutcome = outcome;
-  refreshLegalMoves();
-  render();
-  renderBeams(outcome.beams);
-  saveGame();
-  if (session.state.winner || session.state.draw) {
-    showResult();
-  } else {
-    window.setTimeout(clearBeams, BEAM_VISIBLE_MS);
-  }
-}
-
 function restart() {
-  startGame(session.mode, session.difficulty);
+  startGame(session.mode, session.difficulty, true, session.humanSide);
 }
 
 /** Leave the active match and restore the main menu. */
@@ -684,6 +706,7 @@ function sessionFromSave(data) {
     data.matchId || legacyMatchId(data),
     data.startedAt || new Date().toISOString(),
     data.gameVersion || GAME_VERSION,
+    data.humanSide === BLUE_SIDE ? BLUE_SIDE : RED_SIDE,
   );
   for (const item of data.moves || []) {
     const before = cloneState(restored.state);
@@ -740,10 +763,11 @@ function startGameView() {
   elements.pauseOverlay.hidden = true;
   elements.resultOverlay.hidden = true;
   elements.gameScreen.classList.remove("match-complete");
-  elements.modeLabel.textContent =
-    session.mode === "computer"
-      ? t("versusComputer", { difficulty: difficultyName(session.difficulty).toUpperCase() })
-      : t("localMode");
+  document.querySelector(
+    `input[name="player-side"][value="${session.humanSide}"]`,
+  ).checked = true;
+  renderBoardLabels();
+  renderModeLabel();
   elements.aiDetail.textContent = "";
   refreshLegalMoves();
   clearBeams();
@@ -756,6 +780,16 @@ function updateProgressUI() {
   elements.ultraState.textContent = progress.ultraUnlocked ? t("ready") : t("locked");
   elements.progressNote.textContent = progress.ultraUnlocked ? t("ultraReadyNote") : t("ultraLockedNote");
   elements.progressNote.classList.toggle("unlocked", progress.ultraUnlocked);
+}
+
+/** Render the localized mode, difficulty, and human side in the top bar. */
+function renderModeLabel() {
+  elements.modeLabel.textContent = session.mode === "computer"
+    ? t("versusComputerSide", {
+      difficulty: difficultyName(session.difficulty).toUpperCase(),
+      side: sideName(session.humanSide).toUpperCase(),
+    })
+    : t("localMode");
 }
 
 /** Validate and upgrade an older active-save representation in place. */
@@ -834,9 +868,7 @@ function applyLanguage(nextLanguage, persist = true) {
   });
   updateProgressUI();
   if (!elements.gameScreen.hidden) {
-    elements.modeLabel.textContent = session.mode === "computer"
-      ? t("versusComputer", { difficulty: difficultyName(session.difficulty).toUpperCase() })
-      : t("localMode");
+    renderModeLabel();
     render();
     if (session.state.winner || session.state.draw) showResult(false);
   }
@@ -875,7 +907,6 @@ class Audio {
         laser: [210, 0.16],
         impact: [110, 0.12],
         victory: [520, 0.32],
-        undo: [260, 0.1],
       }[name] || [440, 0.08];
       oscillator.frequency.setValueAtTime(settings[0], this.context.currentTime);
       oscillator.frequency.exponentialRampToValueAtTime(settings[0] * 1.8, this.context.currentTime + settings[1]);
@@ -891,15 +922,6 @@ class Audio {
 }
 
 const audio = new Audio();
-
-for (let index = 1; index <= BOARD_SIZE; index += 1) {
-  const column = document.createElement("span");
-  column.textContent = String(index);
-  document.querySelector("#column-labels").append(column);
-  const row = document.createElement("span");
-  row.textContent = String(index);
-  document.querySelector("#row-labels").append(row);
-}
 
 document.querySelector("#start-computer").addEventListener("click", () => startGame("computer"));
 document.querySelector("#start-local").addEventListener("click", () => startGame("local"));
@@ -926,7 +948,6 @@ document.addEventListener("keydown", (event) => {
   if (elements.gameScreen.hidden || paused) return;
   if (event.key.toLowerCase() === "q" || event.key === "/") selectMirror(Cell.SLASH);
   else if (event.key.toLowerCase() === "e" || event.key === "\\") selectMirror(Cell.BACKSLASH);
-  else if (event.key.toLowerCase() === "u") undo();
   else if (event.key.toLowerCase() === "r") restart();
 });
 

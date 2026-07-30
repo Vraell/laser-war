@@ -49,7 +49,12 @@ Full starting board:
 . . . O K O . . .
 ```
 
-`K` is the bottom king. `k` is the top king. `O` is a protection block.
+`K` is the Red king, which starts at the bottom. `k` is the Blue king, which starts at the top. `O` is a
+protection block. Red takes the first turn.
+
+In a computer match, the player may choose Red or Blue. Choosing Blue rotates the displayed board 180 degrees
+before the match so the player's pieces remain nearest them, as when playing Black in chess. This is a fixed
+view: the board does not rotate between turns. Engine coordinates and the underlying position are unchanged.
 
 ## Turn
 

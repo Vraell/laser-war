@@ -404,6 +404,26 @@ assert.deepEqual(productionSearch.softTiming(game.initialState(), 0), {
   latePosition: false,
   softDeadline: 4000,
 });
+const openingChildren = game.legalChildren(game.initialState()).slice(0, 3);
+const varietySearch = new UltraSearch(game, () => 0, TEST_PROFILE, () => {}, () => 0.99);
+const varietyState = game.initialState();
+const varietyKey = varietySearch.keyForState(varietyState);
+varietySearch.childrenCache.set(varietyKey, openingChildren);
+varietySearch.rootScores.set(varietyKey, new Map([
+  [((openingChildren[0].move.row * 9 + openingChildren[0].move.col) * 2), 120],
+  [((openingChildren[1].move.row * 9 + openingChildren[1].move.col) * 2) + 1, 120],
+  [((openingChildren[2].move.row * 9 + openingChildren[2].move.col) * 2), 119],
+]));
+assert.deepEqual(
+  varietySearch.openingVariation(
+    varietyState,
+    varietyKey,
+    openingChildren[0].move,
+    120,
+    { latePosition: false },
+  ),
+  openingChildren[1].move,
+);
 const commonOpeningState = game.resolveMove(game.initialState(), {
   row: 4,
   col: 1,

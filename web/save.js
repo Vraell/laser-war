@@ -30,6 +30,7 @@ export function buildActiveSave(session) {
     gameVersion: session.gameVersion,
     mode: session.mode,
     difficulty: session.difficulty,
+    humanSide: session.humanSide,
     moves: session.history.map((record) => ({
       actor: record.actor,
       row: record.move.row,

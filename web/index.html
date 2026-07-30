@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#0e1215">
     <meta name="description" content="Laser War, a tactical mirror strategy game.">
     <title>Laser War</title>
-    <link rel="icon" href="assets/app-icon.png?v=0.12.0">
-    <link rel="stylesheet" href="styles.css?v=0.12.0">
+    <link rel="icon" href="assets/app-icon.png?v=0.13.0">
+    <link rel="stylesheet" href="styles.css?v=0.13.0">
   </head>
   <body>
     <section class="menu-screen" id="menu-screen">
@@ -30,6 +30,17 @@
             <span><b data-i18n="ultra">Ultra</b><small id="ultra-state">LOCKED</small></span>
           </label>
         </fieldset>
+        <fieldset class="player-side">
+          <legend data-i18n="yourColor">YOUR COLOR VS AI</legend>
+          <label>
+            <input type="radio" name="player-side" value="bottom" checked>
+            <span><i class="side-swatch red"></i><b data-i18n="redFirst">Red · first</b></span>
+          </label>
+          <label>
+            <input type="radio" name="player-side" value="top">
+            <span><i class="side-swatch blue"></i><b data-i18n="blueSecond">Blue · second</b></span>
+          </label>
+        </fieldset>
         <p class="progress-note" id="progress-note">Defeat Hard to unlock Ultra.</p>
         <div class="language-bar">
           <span data-i18n="language">LANGUAGE</span>
@@ -42,7 +53,7 @@
           <button class="quiet" id="show-rules" data-i18n="rules">Rules</button>
         </div>
       </div>
-      <span class="version">v0.12.0 web</span>
+      <span class="version">v0.13.0 web</span>
     </section>
 
     <main class="game-screen" id="game-screen" hidden>
@@ -146,6 +157,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="app.js?v=0.12.0"></script>
+    <script type="module" src="app.js?v=0.13.0"></script>
   </body>
 </html>

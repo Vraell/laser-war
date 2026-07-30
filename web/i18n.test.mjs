@@ -43,8 +43,14 @@ assert.equal(translate("fr", "localMatchup"), "Rouge contre Bleu");
 assert.equal(translate("en", "topKing"), "blue king");
 assert.equal(translate("fr", "bottomKing"), "roi rouge");
 assert.equal(translate("en", "resultDetail", { difficulty: "Hard", count: "17 moves" }), "Hard · 17 moves");
-assert.equal(translate("en", "computerMatchup", { difficulty: "Ultra" }), "You vs Ultra AI");
-assert.equal(translate("fr", "computerMatchup", { difficulty: "Ultra" }), "Vous contre l'IA Ultra");
+assert.equal(
+  translate("en", "computerMatchup", { difficulty: "Ultra", human: "Blue", computer: "Red" }),
+  "You (Blue) vs Ultra AI (Red)",
+);
+assert.equal(
+  translate("fr", "computerMatchup", { difficulty: "Ultra", human: "bleu", computer: "rouge" }),
+  "Vous (bleu) contre l'IA Ultra (rouge)",
+);
 assert.equal(translate("fr", "matchLogTitle"), "LASER WAR · HISTORIQUE");
 assert.equal(translate("fr", "ultraSearch"), "Ultra · classement des coups possibles");
 assert.equal(

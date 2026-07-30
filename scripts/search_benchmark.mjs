@@ -91,7 +91,7 @@ const [candidate, baseline] = await Promise.all([
 ]);
 try {
   const samples = { candidate: [], baseline: [] };
-  for (let run = 0; run < 3; run += 1) {
+  for (let run = 0; run < 5; run += 1) {
     const order = run % 2
       ? [["baseline", baseline], ["candidate", candidate]]
       : [["candidate", candidate], ["baseline", baseline]];
@@ -101,7 +101,7 @@ try {
   }
   const median = (results) => [...results].sort(
     (left, right) => left.milliseconds - right.milliseconds,
-  )[1];
+  )[Math.floor(results.length / 2)];
   const baselineResult = median(samples.baseline);
   const candidateResult = median(samples.candidate);
   const ratio = candidateResult.milliseconds / baselineResult.milliseconds;

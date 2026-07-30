@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Game } from "../web/engine.js";
-import { summarizePairs } from "./arena_stats.mjs";
+import { passesArenaGate, summarizePairs } from "./arena_stats.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const difficulties = ["easy", "medium", "hard", "ultra"];
@@ -346,15 +346,13 @@ console.log(
 if (illegalMoves) {
   throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
 }
-if (options.gate === "nonregression" && (
-  aggregate.scoreRate < 0.5 || aggregate.low < 0.45
-)) {
+if (options.gate === "nonregression" && !passesArenaGate(aggregate, options.gate)) {
   throw new Error(
     `Candidate failed non-regression: score ${(aggregate.scoreRate * 100).toFixed(1)}%, `
-    + `lower bound ${(aggregate.low * 100).toFixed(1)}%.`,
+    + `interval ${(aggregate.low * 100).toFixed(1)}–${(aggregate.high * 100).toFixed(1)}%.`,
   );
 }
-if (options.gate === "improvement" && aggregate.low <= 0.5) {
+if (options.gate === "improvement" && !passesArenaGate(aggregate, options.gate)) {
   throw new Error(
     `Improvement is not established: lower bound ${(aggregate.low * 100).toFixed(1)}%.`,
   );

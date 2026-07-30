@@ -151,6 +151,75 @@ button.primary {
   border: 0;
 }
 
+.player-side {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.player-side legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.player-side label {
+  position: relative;
+}
+
+.player-side input {
+  position: absolute;
+  opacity: 0;
+}
+
+.player-side span {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(23, 29, 34, 0.9);
+  cursor: pointer;
+}
+
+.player-side b {
+  font-size: 11px;
+}
+
+.player-side input:focus-visible + span {
+  outline: 3px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.player-side input:checked + span {
+  border-color: var(--accent);
+  background: #202a30;
+  color: var(--ink);
+}
+
+.side-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.side-swatch.red {
+  background: var(--player-red);
+  color: var(--player-red);
+}
+
+.side-swatch.blue {
+  background: var(--player-blue);
+  color: var(--player-blue);
+}
+
 .difficulty legend {
   margin-bottom: 10px;
   color: var(--muted);

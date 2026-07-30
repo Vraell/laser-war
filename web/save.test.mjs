@@ -8,9 +8,11 @@ const saved = buildActiveSave({
   gameVersion: "v0.11.14",
   mode: "local",
   difficulty: "medium",
+  humanSide: "top",
   history: [],
 });
 
 assert.equal(saved.gameVersion, "v0.11.14");
+assert.equal(saved.humanSide, "top");
 
 console.log("Web save metadata checks passed.");

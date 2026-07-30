@@ -65,3 +65,13 @@ export function summarizePairs(pairScores, bootstrapOptions) {
     pentanomial: pentanomialCounts(pairScores),
   };
 }
+
+/** Apply the arena's practical non-regression or statistical improvement rule. */
+export function passesArenaGate(summary, gate) {
+  if (gate === "off") return true;
+  if (gate === "nonregression") {
+    return summary.scoreRate >= 0.45 && summary.high >= 0.5;
+  }
+  if (gate === "improvement") return summary.low > 0.5;
+  throw new Error(`Unknown arena gate: ${gate}`);
+}
