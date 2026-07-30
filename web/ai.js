@@ -1,4 +1,5 @@
 import { BOARD_SIZE, Cell } from "./engine.js?v=0.11.19";
+import { TacticalProofSearch } from "./tactics.js?v=0.11.19";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -11,7 +12,7 @@ const MATE_SCORE = 10_000;
 class SearchInterrupted extends Error {}
 
 function moveKey(move) {
-  return `${move.row},${move.col},${move.mirror}`;
+  return ((move.row * BOARD_SIZE + move.col) * 2) + Number(move.mirror === Cell.BACKSLASH);
 }
 
 function stateKey(state) {
@@ -39,15 +40,14 @@ export function routePressureScore(routeCosts, own, opponent) {
     (costs) => boundedRouteCost(costs, own),
   ).sort((a, b) => a - b);
   const raceGap = dangerCosts[0] - attackCosts[0];
+  const reserveGap = dangerCosts[1] - attackCosts[1];
   const controlGaps = routeCosts.map(
     (costs) => boundedRouteCost(costs, own) - boundedRouteCost(costs, opponent),
   );
-  return raceGap * 55
-    + (
-      dangerCosts.reduce((total, cost) => total + cost, 0)
-      - attackCosts.reduce((total, cost) => total + cost, 0)
-    ) * 12
+  return raceGap * 67
+    + reserveGap * 42
     + signedSquare(raceGap) * 28
+    + signedSquare(reserveGap) * 18
     + controlGaps.reduce((total, gap) => total + signedSquare(gap), 0) * 8;
 }
 
@@ -177,14 +177,15 @@ export class UltraSearch {
     this.killers = new Map();
     this.cache = new Map();
     this.childrenCache = new Map();
-    this.strictChildren = new Set();
     this.legalityCache = new Map();
+    this.fastLegalityCache = new Map();
     this.evaluationCache = new Map();
     this.orderingEvaluationCache = new Map();
     this.forcingCache = new Map();
     this.forcedExposureCache = new Map();
     this.rootSurvivalCache = new Map();
     this.stateKeys = new WeakMap();
+    this.shieldMetricsCache = new WeakMap();
   }
 
   /** Choose a move with iterative deepening under the Ultra budget. */
@@ -196,8 +197,50 @@ export class UltraSearch {
     this.reportProgress("preparing", true);
     const fastChildren = this.game.legalChildren(state, false);
     this.childrenCache.set(rootKey, fastChildren);
+    for (const { move, state: child } of fastChildren) {
+      if (child.winner !== state.turn) continue;
+      if (!this.strictChild(state, move, child)) continue;
+      return {
+        move,
+        score: MATE_SCORE - 1,
+        depth: 1,
+        nodes: fastChildren.length,
+        elapsed: this.now() - started,
+      };
+    }
+    const proofMaxNodes = this.profile.proofMaxNodes ?? 5000;
+    const proofDeadline = Math.min(
+      this.deadline,
+      started + Math.min(1000, this.profile.timeLimit * 0.1),
+    );
+    const proof = proofMaxNodes > 0
+      ? new TacticalProofSearch(this.game, {
+        now: this.now,
+        deadline: proofDeadline,
+        maxNodes: proofMaxNodes,
+      }).prove(state, state.turn, this.profile.proofPlies ?? 5)
+      : { status: "unknown", nodes: 0 };
+    if (proof.status === "proven" && proof.line.length) {
+      const move = proof.line[0];
+      const child = fastChildren.find(({ move: candidate }) => moveKey(candidate) === moveKey(move))?.state;
+      if (child && this.strictChild(state, move, child)) {
+        return {
+          move,
+          score: MATE_SCORE - proof.distance,
+          depth: proof.distance,
+          nodes: fastChildren.length + proof.nodes,
+          elapsed: this.now() - started,
+        };
+      }
+    }
     const children = this.selectRootChildren(state);
-    if (!children.length) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: 0 };
+    if (!children.length) return {
+      move: null,
+      score: this.baseEvaluation(state),
+      depth: 0,
+      nodes: 0,
+      elapsed: 0,
+    };
     this.childrenCache.set(rootKey, children);
 
     const orderedFallback = this.orderedChildren(state, 0);
@@ -207,13 +250,19 @@ export class UltraSearch {
     ) || orderedFallback.find(
       ({ move, state: child }) => this.strictChild(state, move, child),
     );
-    if (!fallback) return { move: null, score: this.game.evaluate(state), depth: 0, nodes: 0, elapsed: this.now() - started };
+    if (!fallback) return {
+      move: null,
+      score: this.baseEvaluation(state),
+      depth: 0,
+      nodes: 0,
+      elapsed: this.now() - started,
+    };
     let bestMove = fallback.move;
     let bestScore = -this.strategicEvaluation(fallback.state);
     let completedDepth = 1;
     let previousIteration = null;
     let useHardDeadline = false;
-    this.nodes = children.length;
+    this.nodes = fastChildren.length + proof.nodes + children.length;
     for (let depth = 1; depth <= this.profile.maxDepth; depth += 1) {
       this.activeDepth = depth;
       this.reportProgress("searching", true);
@@ -336,7 +385,7 @@ export class UltraSearch {
       this.checkInterrupted();
       const score = -this.negamax(child, depth - 1, -beta, -alpha, 1);
       ranked.push({ move, state: child, score });
-      if (score > alpha && this.strictChild(state, move, child)) alpha = score;
+      if (score > alpha && this.strictChild(state, move, child, false)) alpha = score;
     }
     ranked.sort((left, right) => (
       right.score - left.score
@@ -370,6 +419,12 @@ export class UltraSearch {
         return { move: candidate.move, score: candidate.score };
       }
     }
+    for (const candidate of ranked) {
+      this.checkInterrupted();
+      if (this.strictChild(state, candidate.move, candidate.state)) {
+        return { move: candidate.move, score: candidate.score };
+      }
+    }
     throw new Error("Ultra search found no fully legal root move.");
   }
 
@@ -396,7 +451,7 @@ export class UltraSearch {
     this.checkInterrupted();
     this.nodes += 1;
     if (state.winner) {
-      const score = this.game.evaluate(state);
+      const score = this.baseEvaluation(state);
       return score > 0 ? score - ply : score + ply;
     }
     if (state.draw) return 0;
@@ -461,16 +516,17 @@ export class UltraSearch {
     }
     const preferred = this.ordering.get(key);
     const killers = this.killers.get(ply) || [];
-    return [...children].sort((left, right) => (
-      this.movePriority(state, right.move, right.state, preferred, killers)
-      - this.movePriority(state, left.move, left.state, preferred, killers)
-    ));
+    return children
+      .map((child) => ({
+        child,
+        priority: this.movePriority(state, child.move, child.state, preferred, killers),
+      }))
+      .sort((left, right) => right.priority - left.priority)
+      .map(({ child }) => child);
   }
 
   /** Select the highest-ranked fully legal children up to one branch limit. */
   strictSubset(state, children, limit, allowExact = false) {
-    const key = this.keyForState(state);
-    if (this.strictChildren.has(key)) return children.slice(0, limit);
     const selected = [];
     for (const item of children) {
       this.checkInterrupted();
@@ -483,8 +539,9 @@ export class UltraSearch {
   /** Return a fully legal child while sharing exact validator results. */
   strictChild(state, move, fastChild = null, allowExact = true) {
     const key = this.keyForState(state);
-    if (!this.legalityCache.has(key)) this.legalityCache.set(key, new Map());
-    const legality = this.legalityCache.get(key);
+    const cache = allowExact ? this.legalityCache : this.fastLegalityCache;
+    if (!cache.has(key)) cache.set(key, new Map());
+    const legality = cache.get(key);
     const keyForMove = moveKey(move);
     if (legality.get(keyForMove) === false) return null;
     if (legality.get(keyForMove) === true && fastChild) return fastChild;
@@ -492,7 +549,7 @@ export class UltraSearch {
       const legal = allowExact
         ? this.game.jointPathPreserved(state.board, fastChild.board, move)
         : this.game.jointPathPreservedFast(state.board, fastChild.board, move);
-      if (legal || allowExact) legality.set(keyForMove, legal);
+      legality.set(keyForMove, legal);
       return legal ? fastChild : null;
     }
     try {
@@ -531,10 +588,30 @@ export class UltraSearch {
   orderingEvaluation(state, child) {
     const key = this.keyForState(child);
     if (this.orderingEvaluationCache.has(key)) return this.orderingEvaluationCache.get(key);
-    let score = this.game.evaluate(child);
+    let score = this.baseEvaluation(child);
     score += this.shieldExchange(state, child) * 24;
     this.orderingEvaluationCache.set(key, score);
     return score;
+  }
+
+  /** Score terminal state, king cover, and immediate next-volley exposure. */
+  baseEvaluation(state) {
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    if (state.draw) return 0;
+    if (state.winner === own) return MATE_SCORE;
+    if (state.winner === opponent) return -MATE_SCORE;
+    const shields = this.shieldMetrics(state.board);
+    let hitMask = 0;
+    for (const beam of this.game.fireLasers(state.board)) {
+      if (beam.hitKing === "top") hitMask |= 1;
+      else if (beam.hitKing === "bottom") hitMask |= 2;
+    }
+    const ownMask = own === "top" ? 1 : 2;
+    const opponentMask = opponent === "top" ? 1 : 2;
+    return (shields[own].count - shields[opponent].count) * 25
+      + (hitMask & opponentMask ? 300 : 0)
+      - (hitMask & ownMask ? 300 : 0);
   }
 
   /** Extend exposed-king horizons through all legal tactical evasions. */
@@ -631,12 +708,12 @@ export class UltraSearch {
 
   /** Yield only placements capable of changing the lasers' current volley. */
   *forcingMoves(state) {
-    const liveSquares = new Set(
-      this.game.fireLasers(state.board)
-        .flatMap((beam) => beam.path.map(([row, col]) => `${row},${col}`)),
-    );
+    const liveSquares = new Uint8Array(BOARD_SIZE * BOARD_SIZE);
+    for (const beam of this.game.fireLasers(state.board)) {
+      for (const [row, col] of beam.path) liveSquares[row * BOARD_SIZE + col] = 1;
+    }
     for (const move of this.game.pseudoMoves(state)) {
-      if (liveSquares.has(`${move.row},${move.col}`)) yield move;
+      if (liveSquares[move.row * BOARD_SIZE + move.col]) yield move;
     }
   }
 
@@ -645,61 +722,102 @@ export class UltraSearch {
     const key = this.keyForState(state);
     if (this.evaluationCache.has(key)) return this.evaluationCache.get(key);
 
-    let score = this.game.evaluate(state);
-    const own = state.turn;
-    const opponent = own === "top" ? "bottom" : "top";
-    const ownKing = own === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING;
-    const opponentKing = own === "top" ? Cell.BOTTOM_KING : Cell.TOP_KING;
-    score += this.shieldStructure(state, ownKing) - this.shieldStructure(state, opponentKing);
-
-    const reachable = this.game.reachableKingsByLaser(state.board);
-    const attackRoutes = reachable.filter((kings) => kings.has(opponent)).length;
-    const exposedRoutes = reachable.filter((kings) => kings.has(own)).length;
-    score += (attackRoutes - exposedRoutes) * 18;
-
-    const routeCosts = this.game.routeCostsByLaser(state.board);
-    score += routePressureScore(routeCosts, own, opponent);
-
-    const hitKings = new Set(this.game.fireLasers(state.board).map((beam) => beam.hitKing).filter(Boolean));
-    if (hitKings.has(opponent)) score += 240;
-    if (hitKings.has(own)) score -= 240;
+    const components = this.strategicEvaluationComponents(state);
+    const score = Object.values(components).reduce((total, value) => total + value, 0);
     this.evaluationCache.set(key, score);
     return score;
   }
 
+  /** Return named evaluation terms so each heuristic can be tested independently. */
+  strategicEvaluationComponents(state) {
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    const terminal = state.draw
+      ? 0
+      : state.winner === own
+        ? MATE_SCORE
+        : state.winner === opponent ? -MATE_SCORE : 0;
+    if (state.winner || state.draw) {
+      return {
+        terminal,
+        shieldCount: 0,
+        shieldShape: 0,
+        reachability: 0,
+        routeControl: 0,
+        exposure: 0,
+      };
+    }
+    const shieldMetrics = this.shieldMetrics(state.board);
+    const shieldCount = (
+      shieldMetrics[own].count - shieldMetrics[opponent].count
+    ) * 25;
+    const shieldShape = shieldMetrics[own].shape - shieldMetrics[opponent].shape;
+
+    const reachable = this.game.reachableKingMasksByLaser(state.board);
+    const attackMask = opponent === "top" ? 1 : 2;
+    const exposedMask = own === "top" ? 1 : 2;
+    let attackRoutes = 0;
+    let exposedRoutes = 0;
+    for (const mask of reachable) {
+      if (mask & attackMask) attackRoutes += 1;
+      if (mask & exposedMask) exposedRoutes += 1;
+    }
+    const reachability = (attackRoutes - exposedRoutes) * 18;
+
+    const routeCosts = this.game.routeCostsByLaser(state.board);
+    const routeControl = routePressureScore(routeCosts, own, opponent);
+
+    let hitMask = 0;
+    for (const beam of this.game.fireLasers(state.board)) {
+      if (beam.hitKing === "top") hitMask |= 1;
+      else if (beam.hitKing === "bottom") hitMask |= 2;
+    }
+    const exposure = (hitMask & attackMask ? 540 : 0)
+      - (hitMask & exposedMask ? 540 : 0);
+    return {
+      terminal,
+      shieldCount,
+      shieldShape,
+      reachability,
+      routeControl,
+      exposure,
+    };
+  }
+
   /** Prefer equal-scoring moves that damage opposing king cover over friendly cover. */
   shieldExchange(state, child) {
-    const ownKing = state.turn === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING;
-    const opponentKing = state.turn === "top" ? Cell.BOTTOM_KING : Cell.TOP_KING;
-    const ownLost = this.game.nearbyShields(state.board, ownKing)
-      - this.game.nearbyShields(child.board, ownKing);
-    const opponentLost = this.game.nearbyShields(state.board, opponentKing)
-      - this.game.nearbyShields(child.board, opponentKing);
+    const own = state.turn;
+    const opponent = own === "top" ? "bottom" : "top";
+    const before = this.shieldMetrics(state.board);
+    const after = this.shieldMetrics(child.board);
+    const ownLost = before[own].count - after[own].count;
+    const opponentLost = before[opponent].count - after[opponent].count;
     return opponentLost - ownLost;
   }
 
-  /** Weight close shields more heavily than loose outer protection. */
-  shieldStructure(state, king) {
-    let kingPosition = null;
-    for (let row = 0; row < BOARD_SIZE && !kingPosition; row += 1) {
-      for (let col = 0; col < BOARD_SIZE; col += 1) {
-        if (state.board[row][col] === king) {
-          kingPosition = [row, col];
-          break;
-        }
-      }
-    }
-    if (!kingPosition) return 0;
-    let score = 0;
+  /** Cache shield count and distance-weighted shape for both fixed kings. */
+  shieldMetrics(board) {
+    let metrics = this.shieldMetricsCache.get(board);
+    if (metrics) return metrics;
+    metrics = {
+      top: { count: 0, shape: 0 },
+      bottom: { count: 0, shape: 0 },
+    };
     for (let row = 0; row < BOARD_SIZE; row += 1) {
       for (let col = 0; col < BOARD_SIZE; col += 1) {
-        if (state.board[row][col] !== Cell.SHIELD) continue;
-        const distance = Math.max(Math.abs(row - kingPosition[0]), Math.abs(col - kingPosition[1]));
-        if (distance === 1) score += 18;
-        else if (distance === 2) score += 6;
+        if (board[row][col] !== Cell.SHIELD) continue;
+        const topDistance = Math.max(row, Math.abs(col - 4));
+        const bottomDistance = Math.max(BOARD_SIZE - 1 - row, Math.abs(col - 4));
+        if (topDistance <= 2) metrics.top.count += 1;
+        if (bottomDistance <= 2) metrics.bottom.count += 1;
+        if (topDistance === 1) metrics.top.shape += 18;
+        else if (topDistance === 2) metrics.top.shape += 6;
+        if (bottomDistance === 1) metrics.bottom.shape += 18;
+        else if (bottomDistance === 2) metrics.bottom.shape += 6;
       }
     }
-    return score;
+    this.shieldMetricsCache.set(board, metrics);
+    return metrics;
   }
 
   /** Return a stable serialized key for an immutable search state. */

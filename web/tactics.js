@@ -2,7 +2,7 @@
 class ProofInterrupted extends Error {}
 
 function moveKey(move) {
-  return `${move.row},${move.col},${move.mirror}`;
+  return ((move.row * 9 + move.col) * 2) + Number(move.mirror === "\\");
 }
 
 function stateKey(state) {
@@ -17,6 +17,7 @@ export class TacticalProofSearch {
     this.game = game;
     this.now = options.now || (() => performance.now());
     this.deadline = options.deadline ?? Infinity;
+    this.maxNodes = options.maxNodes ?? Infinity;
     this.nodes = 0;
     this.memo = new Map();
   }
@@ -103,21 +104,21 @@ export class TacticalProofSearch {
   candidateChildren(state, attackerTurn) {
     let children = this.game.legalChildren(state, false);
     if (attackerTurn) {
-      const liveSquares = new Set(
-        this.game.fireLasers(state.board)
-          .flatMap((beam) => beam.path.map(([row, col]) => `${row},${col}`)),
-      );
+      const liveSquares = new Uint8Array(81);
+      for (const beam of this.game.fireLasers(state.board)) {
+        for (const [row, col] of beam.path) liveSquares[row * 9 + col] = 1;
+      }
       children = children.filter(
-        ({ move }) => liveSquares.has(`${move.row},${move.col}`),
+        ({ move }) => liveSquares[move.row * 9 + move.col],
       );
     }
     return children.sort((left, right) => (
       Number(Boolean(right.state.winner)) - Number(Boolean(left.state.winner))
-      || moveKey(left.move).localeCompare(moveKey(right.move))
+      || moveKey(left.move) - moveKey(right.move)
     ));
   }
 
   checkInterrupted() {
-    if (this.now() >= this.deadline) throw new ProofInterrupted();
+    if (this.nodes >= this.maxNodes || this.now() >= this.deadline) throw new ProofInterrupted();
   }
 }

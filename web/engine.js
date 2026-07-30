@@ -13,21 +13,18 @@ export const Cell = Object.freeze({
   SHIELD: "O",
 });
 
-const DIRS = {
-  N: [-1, 0],
-  E: [0, 1],
-  S: [1, 0],
-  W: [0, -1],
-};
-
-const SLASH = { N: "E", E: "N", S: "W", W: "S" };
-const BACKSLASH = { N: "W", W: "N", S: "E", E: "S" };
 const TURNS = { top: "bottom", bottom: "top" };
 const DIRECTION_INDEX = { N: 0, E: 1, S: 2, W: 3 };
 const DIRECTION_NAMES = ["N", "E", "S", "W"];
 const DIRECTION_STEPS = [[-1, 0], [0, 1], [1, 0], [0, -1]];
 const SLASH_INDEX = [1, 0, 3, 2];
 const BACKSLASH_INDEX = [3, 2, 1, 0];
+const ROUTE_HEAP_BASE = 512;
+const ROUTE_HEAP_COLUMNS = BOARD_SIZE + 2;
+const SQUARE_BITS = Array.from(
+  { length: BOARD_SIZE * BOARD_SIZE },
+  (_, index) => 1n << BigInt(index),
+);
 
 function key(row, col) {
   return `${row},${col}`;
@@ -53,20 +50,26 @@ function illegalMove(code, message) {
   return error;
 }
 
-/** Push one cost-first tuple into a binary min-heap. */
+/** Pack one route frontier state into a cost-sortable integer. */
+function packedRoute(cost, row, col, direction) {
+  const state = ((row * ROUTE_HEAP_COLUMNS + col + 1) * 4) + direction;
+  return cost * ROUTE_HEAP_BASE + state;
+}
+
+/** Push one packed route state into a binary min-heap. */
 function pushCost(frontier, item) {
   frontier.push(item);
   let index = frontier.length - 1;
   while (index > 0) {
     const parent = Math.floor((index - 1) / 2);
-    if (frontier[parent][0] <= item[0]) break;
+    if (frontier[parent] <= item) break;
     frontier[index] = frontier[parent];
     index = parent;
   }
   frontier[index] = item;
 }
 
-/** Pop the lowest-cost tuple from a binary min-heap. */
+/** Pop the lowest-cost packed route state from a binary min-heap. */
 function popCost(frontier) {
   const first = frontier[0];
   const tail = frontier.pop();
@@ -76,8 +79,8 @@ function popCost(frontier) {
     const left = index * 2 + 1;
     const right = left + 1;
     if (left >= frontier.length) break;
-    const child = right < frontier.length && frontier[right][0] < frontier[left][0] ? right : left;
-    if (frontier[child][0] >= tail[0]) break;
+    const child = right < frontier.length && frontier[right] < frontier[left] ? right : left;
+    if (frontier[child] >= tail) break;
     frontier[index] = frontier[child];
     index = child;
   }
@@ -94,12 +97,18 @@ export class Game {
     ];
     this.laserEntrySquares = new Set([key(MIDDLE_ROW, 0), key(MIDDLE_ROW, BOARD_SIZE - 1)]);
     this.reachabilityCache = new Map();
+    this.reachabilityMaskCache = new Map();
     this.jointReachabilityCache = new Map();
     this.routeCostCache = new Map();
     this.beamCache = new Map();
     this.boardKeys = new WeakMap();
-    this.forbiddenSquaresCache = new WeakMap();
-    this.forbiddenMaskCache = new WeakMap();
+    this.forbiddenSquares = null;
+    this.forbiddenMask = null;
+    this.reachabilitySeen = new Uint32Array(BOARD_SIZE * BOARD_SIZE * 4);
+    this.reachabilityGeneration = 0;
+    this.reachabilityStack = [];
+    this.compatibleVisitedLeft = new Uint8Array(BOARD_SIZE * BOARD_SIZE * 4);
+    this.compatibleVisitedRight = new Uint8Array(BOARD_SIZE * BOARD_SIZE * 4);
   }
 
   /** Create the symmetric opening position for a new match. */
@@ -181,7 +190,6 @@ export class Game {
     const placed = cloneBoard(state.board);
     placed[move.row][move.col] = move.mirror;
     const beams = this.fireLasers(placed);
-    const damaged = cloneBoard(placed);
     const hitKings = new Set(beams.map((beam) => beam.hitKing).filter(Boolean));
     const destroyed = [];
     for (const beam of beams) {
@@ -189,21 +197,24 @@ export class Game {
         destroyed.push(beam.hitShield);
       }
     }
+    const damaged = destroyed.length ? cloneBoard(placed) : placed;
     for (const [row, col] of destroyed) damaged[row][col] = Cell.EMPTY;
 
     const own = state.turn;
     const opponent = TURNS[own];
-    const reachable = this.reachableKingsByLaser(damaged);
+    const reachable = this.reachableKingMasksByLaser(damaged);
     for (let index = 0; index < reachable.length; index += 1) {
-      if (!reachable[index].size) {
+      if (!reachable[index]) {
         const side = index === 0 ? "left" : "right";
         throw illegalMove(`${side}LaserStranded`, `That move strands the ${side} laser.`);
       }
     }
-    if (!reachable.some((kings) => kings.has(own))) {
+    const ownMask = own === "top" ? 1 : 2;
+    const opponentMask = opponent === "top" ? 1 : 2;
+    if (!reachable.some((mask) => mask & ownMask)) {
       throw illegalMove("ownKingUnreachable", "That move blocks every possible laser path to your king.");
     }
-    if (!reachable.some((kings) => kings.has(opponent))) {
+    if (!reachable.some((mask) => mask & opponentMask)) {
       throw illegalMove("opponentKingUnreachable", "That move blocks every possible laser path to the opposing king.");
     }
     if (checkJointPaths && !this.jointPathsAvailable(damaged)) {
@@ -251,26 +262,25 @@ export class Game {
   }
 
   mirrorForbiddenSquares(board) {
-    let forbidden = this.forbiddenSquaresCache.get(board);
-    if (!forbidden) {
-      forbidden = new Set([...this.laserEntrySquares, ...this.kingAdjacentSquares(board)]);
-      this.forbiddenSquaresCache.set(board, forbidden);
+    if (!this.forbiddenSquares) {
+      this.forbiddenSquares = new Set([
+        ...this.laserEntrySquares,
+        ...this.kingAdjacentSquares(board),
+      ]);
     }
-    return forbidden;
+    return this.forbiddenSquares;
   }
 
   /** Return a compact per-cell mask for forbidden mirror turns. */
   mirrorForbiddenMask(board) {
-    let mask = this.forbiddenMaskCache.get(board);
-    if (!mask) {
-      mask = new Uint8Array(BOARD_SIZE * BOARD_SIZE);
+    if (!this.forbiddenMask) {
+      this.forbiddenMask = new Uint8Array(BOARD_SIZE * BOARD_SIZE);
       for (const square of this.mirrorForbiddenSquares(board)) {
         const [row, col] = square.split(",").map(Number);
-        mask[row * BOARD_SIZE + col] = 1;
+        this.forbiddenMask[row * BOARD_SIZE + col] = 1;
       }
-      this.forbiddenMaskCache.set(board, mask);
     }
-    return mask;
+    return this.forbiddenMask;
   }
 
   /** Derive all cells where a mirror would touch either king. */
@@ -355,10 +365,29 @@ export class Game {
   reachableKingsByLaser(board) {
     const boardKey = this.boardKey(board);
     if (this.reachabilityCache.has(boardKey)) return this.reachabilityCache.get(boardKey);
-    const reachable = this.sources.map((source) => this.reachableKings(board, source));
+    const reachable = this.reachableKingMasksByLaser(board).map((mask) => {
+      const kings = new Set();
+      if (mask & 1) kings.add("top");
+      if (mask & 2) kings.add("bottom");
+      return kings;
+    });
     this.reachabilityCache.set(boardKey, reachable);
     if (this.reachabilityCache.size > 4096) {
       this.reachabilityCache.delete(this.reachabilityCache.keys().next().value);
+    }
+    return reachable;
+  }
+
+  /** Return each laser's reachable kings as top/bottom bits without Set allocation. */
+  reachableKingMasksByLaser(board) {
+    const boardKey = this.boardKey(board);
+    if (this.reachabilityMaskCache.has(boardKey)) {
+      return this.reachabilityMaskCache.get(boardKey);
+    }
+    const reachable = this.sources.map((source) => this.reachableKingMask(board, source));
+    this.reachabilityMaskCache.set(boardKey, reachable);
+    if (this.reachabilityMaskCache.size > 4096) {
+      this.reachabilityMaskCache.delete(this.reachabilityMaskCache.keys().next().value);
     }
     return reachable;
   }
@@ -487,10 +516,16 @@ export class Game {
     const frontier = [];
     const costs = {};
     let targetsFound = 0;
-    pushCost(frontier, [0, [source[0], source[1], DIRECTION_INDEX[source[2]]]]);
+    pushCost(frontier, packedRoute(0, source[0], source[1], DIRECTION_INDEX[source[2]]));
 
     while (frontier.length && targetsFound < 2) {
-      const [cost, [row, col, direction]] = popCost(frontier);
+      const packed = popCost(frontier);
+      const cost = Math.floor(packed / ROUTE_HEAP_BASE);
+      const encoded = packed % ROUTE_HEAP_BASE;
+      const direction = encoded % 4;
+      const position = Math.floor(encoded / 4);
+      const row = Math.floor(position / ROUTE_HEAP_COLUMNS);
+      const col = (position % ROUTE_HEAP_COLUMNS) - 1;
       if (this.inBounds(row, col)) {
         const stateIndex = (row * BOARD_SIZE + col) * 4 + direction;
         if (cost !== distances[stateIndex]) continue;
@@ -540,7 +575,7 @@ export class Game {
         const nextIndex = squareIndex * 4 + nextDirection;
         if (nextCost >= distances[nextIndex]) continue;
         distances[nextIndex] = nextCost;
-        pushCost(frontier, [nextCost, [nextRow, nextCol, nextDirection]]);
+        pushCost(frontier, packedRoute(nextCost, nextRow, nextCol, nextDirection));
       }
     }
     return costs;
@@ -548,149 +583,183 @@ export class Game {
 
   /** Find compatible route assignments for one left/right king pairing. */
   jointPairingWitness(board, targets) {
-    const forbiddenTurns = this.mirrorForbiddenSquares(board);
-    const leftRoutes = this.compatibleRoutes(
+    const forbiddenTurns = this.mirrorForbiddenMask(board);
+    const leftVisited = this.compatibleVisitedLeft;
+    const rightVisited = this.compatibleVisitedRight;
+    leftVisited.fill(0);
+    rightVisited.fill(0);
+    let result = null;
+    this.visitCompatibleRoutes(
       board,
       forbiddenTurns,
-      this.sources[0],
-      targets[0],
+      this.sources[0][0],
+      this.sources[0][1],
+      DIRECTION_INDEX[this.sources[0][2]],
+      targets[0] === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING,
       0n,
       0n,
       0n,
       0,
-      0n,
-    );
-    for (const [empty, slash, backslash, mirrorCount] of leftRoutes) {
-      const rightRoutes = this.compatibleRoutes(
+      leftVisited,
+      (empty, slash, backslash, mirrorCount) => this.visitCompatibleRoutes(
         board,
         forbiddenTurns,
-        this.sources[1],
-        targets[1],
+        this.sources[1][0],
+        this.sources[1][1],
+        DIRECTION_INDEX[this.sources[1][2]],
+        targets[1] === "top" ? Cell.TOP_KING : Cell.BOTTOM_KING,
         empty,
         slash,
         backslash,
         mirrorCount,
-        0n,
-      );
-      const result = rightRoutes.next();
-      if (!result.done) {
-        const [witnessEmpty, witnessSlash, witnessBackslash] = result.value;
-        return {
-          empty: witnessEmpty,
-          slash: witnessSlash,
-          backslash: witnessBackslash,
-        };
-      }
-    }
-    return null;
+        rightVisited,
+        (witnessEmpty, witnessSlash, witnessBackslash) => {
+          result = {
+            empty: witnessEmpty,
+            slash: witnessSlash,
+            backslash: witnessBackslash,
+          };
+          return true;
+        },
+      ),
+    );
+    return result;
   }
 
-  /** Yield shared assignments that route one laser to its assigned king. */
-  *compatibleRoutes(
+  /** Visit bounded route assignments until one callback requests an early exit. */
+  visitCompatibleRoutes(
     board,
     forbiddenTurns,
-    source,
+    row,
+    col,
+    direction,
     target,
     empty,
     slash,
     backslash,
     mirrorCount,
     visited,
+    onRoute,
   ) {
-    const [row, col, direction] = source;
-    const [dr, dc] = DIRS[direction];
-    const nextRow = row + dr;
-    const nextCol = col + dc;
-    if (!this.inBounds(nextRow, nextCol)) return;
+    const nextRow = row + DIRECTION_STEPS[direction][0];
+    const nextCol = col + DIRECTION_STEPS[direction][1];
+    if (
+      nextRow < 0 || nextRow >= BOARD_SIZE
+      || nextCol < 0 || nextCol >= BOARD_SIZE
+    ) return false;
 
-    const visitIndex = ((nextRow * BOARD_SIZE + nextCol) * 4) + DIRECTION_INDEX[direction];
-    const visitBit = 1n << BigInt(visitIndex);
-    if (visited & visitBit) return;
-    const nextVisited = visited | visitBit;
+    const visitIndex = ((nextRow * BOARD_SIZE + nextCol) * 4) + direction;
+    if (visited[visitIndex]) return false;
+    visited[visitIndex] = 1;
 
     const cell = board[nextRow][nextCol];
+    let found = false;
     if (cell === Cell.TOP_KING || cell === Cell.BOTTOM_KING) {
-      const hit = cell === Cell.TOP_KING ? "top" : "bottom";
-      if (hit === target) yield [empty, slash, backslash, mirrorCount];
-      return;
-    }
-
-    const squareBit = 1n << BigInt(nextRow * BOARD_SIZE + nextCol);
-    const options = [];
-    if (cell === Cell.SLASH) {
-      options.push([SLASH[direction], empty, slash | squareBit, backslash, mirrorCount]);
-    } else if (cell === Cell.BACKSLASH) {
-      options.push([BACKSLASH[direction], empty, slash, backslash | squareBit, mirrorCount]);
-    } else if (empty & squareBit) {
-      options.push([direction, empty, slash, backslash, mirrorCount]);
-    } else if (slash & squareBit) {
-      options.push([SLASH[direction], empty, slash, backslash, mirrorCount]);
-    } else if (backslash & squareBit) {
-      options.push([BACKSLASH[direction], empty, slash, backslash, mirrorCount]);
-    } else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
-      options.push([direction, empty | squareBit, slash, backslash, mirrorCount]);
-      if (!forbiddenTurns.has(key(nextRow, nextCol)) && mirrorCount < FAST_ROUTE_MIRRORS) {
-        options.push([SLASH[direction], empty, slash | squareBit, backslash, mirrorCount + 1]);
-        options.push([BACKSLASH[direction], empty, slash, backslash | squareBit, mirrorCount + 1]);
+      found = cell === target && onRoute(empty, slash, backslash, mirrorCount);
+    } else {
+      const squareIndex = nextRow * BOARD_SIZE + nextCol;
+      const squareBit = SQUARE_BITS[squareIndex];
+      if (cell === Cell.SLASH) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, SLASH_INDEX[direction], target,
+          empty, slash | squareBit, backslash, mirrorCount, visited, onRoute,
+        );
+      } else if (cell === Cell.BACKSLASH) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, BACKSLASH_INDEX[direction], target,
+          empty, slash, backslash | squareBit, mirrorCount, visited, onRoute,
+        );
+      } else if (empty & squareBit) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, direction, target,
+          empty, slash, backslash, mirrorCount, visited, onRoute,
+        );
+      } else if (slash & squareBit) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, SLASH_INDEX[direction], target,
+          empty, slash, backslash, mirrorCount, visited, onRoute,
+        );
+      } else if (backslash & squareBit) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, BACKSLASH_INDEX[direction], target,
+          empty, slash, backslash, mirrorCount, visited, onRoute,
+        );
+      } else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
+        found = this.visitCompatibleRoutes(
+          board, forbiddenTurns, nextRow, nextCol, direction, target,
+          empty | squareBit, slash, backslash, mirrorCount, visited, onRoute,
+        );
+        if (!found && !forbiddenTurns[squareIndex] && mirrorCount < FAST_ROUTE_MIRRORS) {
+          found = this.visitCompatibleRoutes(
+            board, forbiddenTurns, nextRow, nextCol, SLASH_INDEX[direction], target,
+            empty, slash | squareBit, backslash, mirrorCount + 1, visited, onRoute,
+          ) || this.visitCompatibleRoutes(
+            board, forbiddenTurns, nextRow, nextCol, BACKSLASH_INDEX[direction], target,
+            empty, slash, backslash | squareBit, mirrorCount + 1, visited, onRoute,
+          );
+        }
       }
     }
-
-    for (const [nextDirection, nextEmpty, nextSlash, nextBackslash, nextCount] of options) {
-      yield* this.compatibleRoutes(
-        board,
-        forbiddenTurns,
-        [nextRow, nextCol, nextDirection],
-        target,
-        nextEmpty,
-        nextSlash,
-        nextBackslash,
-        nextCount,
-        nextVisited,
-      );
-    }
+    visited[visitIndex] = 0;
+    return found;
   }
 
   /** Explore all legal future beam turns from one laser source. */
-  reachableKings(board, source) {
+  reachableKingMask(board, source) {
     const forbiddenTurns = this.mirrorForbiddenMask(board);
     let reachable = 0;
-    const seen = new Uint8Array(BOARD_SIZE * BOARD_SIZE * 4);
-    const stack = [source[0], source[1], DIRECTION_INDEX[source[2]]];
+    this.reachabilityGeneration += 1;
+    if (this.reachabilityGeneration === 0xffffffff) {
+      this.reachabilitySeen.fill(0);
+      this.reachabilityGeneration = 1;
+    }
+    const generation = this.reachabilityGeneration;
+    const seen = this.reachabilitySeen;
+    const stack = this.reachabilityStack;
+    stack.length = 0;
+    stack.push(
+      ((source[0] * ROUTE_HEAP_COLUMNS + source[1] + 1) * 4)
+      + DIRECTION_INDEX[source[2]],
+    );
     while (stack.length) {
-      const direction = stack.pop();
-      const col = stack.pop();
-      const row = stack.pop();
-      const [dr, dc] = DIRECTION_STEPS[direction];
-      const nextRow = row + dr;
-      const nextCol = col + dc;
-      if (!this.inBounds(nextRow, nextCol)) continue;
+      const encoded = stack.pop();
+      const direction = encoded % 4;
+      const position = Math.floor(encoded / 4);
+      const row = Math.floor(position / ROUTE_HEAP_COLUMNS);
+      const col = (position % ROUTE_HEAP_COLUMNS) - 1;
+      const nextRow = row + DIRECTION_STEPS[direction][0];
+      const nextCol = col + DIRECTION_STEPS[direction][1];
+      if (
+        nextRow < 0 || nextRow >= BOARD_SIZE
+        || nextCol < 0 || nextCol >= BOARD_SIZE
+      ) continue;
       const squareIndex = nextRow * BOARD_SIZE + nextCol;
       const seenIndex = squareIndex * 4 + direction;
-      if (seen[seenIndex]) continue;
-      seen[seenIndex] = 1;
+      if (seen[seenIndex] === generation) continue;
+      seen[seenIndex] = generation;
       const cell = board[nextRow][nextCol];
       if (cell === Cell.TOP_KING) reachable |= 1;
       else if (cell === Cell.BOTTOM_KING) reachable |= 2;
-      else if (cell === Cell.SLASH) stack.push(nextRow, nextCol, SLASH_INDEX[direction]);
-      else if (cell === Cell.BACKSLASH) stack.push(nextRow, nextCol, BACKSLASH_INDEX[direction]);
-      else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
-        stack.push(nextRow, nextCol, direction);
-        if (!forbiddenTurns[squareIndex]) {
-          if (direction === DIRECTION_INDEX.N || direction === DIRECTION_INDEX.S) {
-            stack.push(nextRow, nextCol, DIRECTION_INDEX.E);
-            stack.push(nextRow, nextCol, DIRECTION_INDEX.W);
-          } else {
-            stack.push(nextRow, nextCol, DIRECTION_INDEX.N);
-            stack.push(nextRow, nextCol, DIRECTION_INDEX.S);
+      else {
+        const encodedSquare = (nextRow * ROUTE_HEAP_COLUMNS + nextCol + 1) * 4;
+        if (cell === Cell.SLASH) stack.push(encodedSquare + SLASH_INDEX[direction]);
+        else if (cell === Cell.BACKSLASH) stack.push(encodedSquare + BACKSLASH_INDEX[direction]);
+        else if (cell === Cell.EMPTY || cell === Cell.SHIELD) {
+          stack.push(encodedSquare + direction);
+          if (!forbiddenTurns[squareIndex]) {
+            if (direction === DIRECTION_INDEX.N || direction === DIRECTION_INDEX.S) {
+              stack.push(encodedSquare + DIRECTION_INDEX.E);
+              stack.push(encodedSquare + DIRECTION_INDEX.W);
+            } else {
+              stack.push(encodedSquare + DIRECTION_INDEX.N);
+              stack.push(encodedSquare + DIRECTION_INDEX.S);
+            }
           }
         }
       }
       if (reachable === 3) break;
     }
-    const result = new Set();
-    if (reachable & 1) result.add("top");
-    if (reachable & 2) result.add("bottom");
-    return result;
+    return reachable;
   }
 
   /** Score a position from the side-to-move perspective. */
@@ -741,7 +810,8 @@ export class Game {
   boardKey(board) {
     let boardKey = this.boardKeys.get(board);
     if (!boardKey) {
-      boardKey = board.map((row) => row.join("")).join("");
+      boardKey = "";
+      for (const row of board) boardKey += row.join("");
       this.boardKeys.set(board, boardKey);
     }
     return boardKey;

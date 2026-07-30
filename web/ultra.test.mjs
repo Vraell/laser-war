@@ -10,6 +10,7 @@ const TEST_PROFILE = {
   maxDepth: 4,
   rootLimit: 24,
   branchLimits: [22, 12, 8],
+  proofMaxNodes: 0,
 };
 const game = new Game();
 let state = game.initialState();
@@ -152,9 +153,63 @@ assert.deepEqual(defensiveDecision.move, { row: 3, col: 3, mirror: "\\" });
 const protectedState = game.initialState("top");
 const pressureSearch = new UltraSearch(game, () => 0, TEST_PROFILE);
 const protectedScore = pressureSearch.strategicEvaluation(protectedState);
+const protectedComponents = pressureSearch.strategicEvaluationComponents(protectedState);
+assert.equal(
+  Object.values(protectedComponents).reduce((total, value) => total + value, 0),
+  protectedScore,
+);
+assert.deepEqual(Object.keys(protectedComponents), [
+  "terminal",
+  "shieldCount",
+  "shieldShape",
+  "reachability",
+  "routeControl",
+  "exposure",
+]);
 const exposedState = structuredClone(protectedState);
 exposedState.board[7][4] = ".";
 assert.ok(pressureSearch.strategicEvaluation(exposedState) > protectedScore);
+
+const symmetricExposureGame = {
+  nearbyShields() {
+    return 0;
+  },
+  reachableKingMasksByLaser() {
+    return [3, 3];
+  },
+  routeCostsByLaser() {
+    return [{ top: 2, bottom: 2 }, { top: 3, bottom: 3 }];
+  },
+  fireLasers() {
+    return [{ hitKing: "top" }, { hitKing: "bottom" }];
+  },
+};
+const symmetricExposureSearch = new UltraSearch(
+  symmetricExposureGame,
+  () => 0,
+  TEST_PROFILE,
+);
+const symmetricExposureState = {
+  board: game.initialState().board,
+  turn: "top",
+  winner: null,
+  draw: false,
+};
+assert.equal(
+  symmetricExposureSearch.strategicEvaluationComponents(symmetricExposureState).exposure,
+  0,
+);
+const terminalComponents = pressureSearch.strategicEvaluationComponents({
+  ...protectedState,
+  winner: "top",
+});
+assert.equal(terminalComponents.terminal, 10000);
+assert.equal(
+  Object.entries(terminalComponents)
+    .filter(([name]) => name !== "terminal")
+    .reduce((total, [, value]) => total + value, 0),
+  0,
+);
 const controlledRoutes = [{ top: 4, bottom: 4 }, { top: 2, bottom: 10 }];
 const counteredRoutes = [{ top: 4, bottom: 2 }, { top: 2, bottom: 10 }];
 assert.ok(routePressureScore(controlledRoutes, "top", "bottom") < 0);
@@ -351,11 +406,18 @@ const openingSafetySearch = new UltraSearch(game, () => 0, {
   branchLimits: [22, 14, 10],
 });
 const openingSafetyMove = openingSafetySearch.choose(commonOpeningState).move;
-assert.deepEqual(openingSafetyMove, { row: 8, col: 1, mirror: "\\" });
+assert.ok(game.isLegalMove(commonOpeningState, openingSafetyMove));
+const openingSafetyState = game.resolveMove(commonOpeningState, openingSafetyMove).state;
+assert.equal(openingSafetyState.winner, null);
+assert.equal(
+  game.legalChildren(openingSafetyState)
+    .some(({ state: child }) => child.winner === openingSafetyState.turn),
+  false,
+);
 assert.ok(
   openingSafetySearch.shieldExchange(
     commonOpeningState,
-    game.resolveMove(commonOpeningState, openingSafetyMove).state,
+    openingSafetyState,
   ) >= 0,
 );
 const lateTimingState = game.initialState();

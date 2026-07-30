@@ -31,6 +31,9 @@ jobs:
       - name: Run tactical corpus
         run: node scripts/tactical_benchmark.mjs
 
+      - name: Compare search speed
+        run: node scripts/search_benchmark.mjs HEAD^
+
       - name: Compare AI strength
         run: >-
           node scripts/elo_benchmark.mjs
