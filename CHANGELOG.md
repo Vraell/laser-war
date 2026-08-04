@@ -60,9 +60,11 @@ No unreleased changes.
   rules, exact solver, judge, statistics, workflow, and integrity bundle into
   the result manifest. Candidate and baseline must also share the same semantic
   rule hash.
-- Changed all operational failures to fail closed. A timeout, illegal move,
-  exception, malformed output, missing game, or truncated color-swapped pair
-  invalidates the batch instead of being counted as usable Elo evidence.
+- Changed candidate operational failures to fail closed. A candidate timeout,
+  illegal move, exception, malformed output, missing game, or truncated color-
+  swapped pair invalidates the batch. A reference-engine failure is recorded as
+  a forfeit under the same 11-second game clock, so an unstable legacy baseline
+  cannot prevent a qualified replacement from shipping.
 - Added a fixed-size paired-bootstrap release gate and kept the experimental
   sequential test advisory. Identical-engine qualification must pass, while a
   deliberately weak first-legal engine must fail.

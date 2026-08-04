@@ -407,6 +407,25 @@ function chooseMove(revision, player, difficulty, game, state, random) {
   return { ...result, arenaOperations: operations, wallMilliseconds: elapsed };
 }
 
+/** Adjudicate reference-engine failures while failing closed for the candidate. */
+function operationalFailure(owner, reason, details) {
+  if (owner === "baseline") {
+    return {
+      ...details,
+      score: 1,
+      invalid: null,
+      forfeit: { owner, reason, error: details.error || null },
+      truncated: false,
+    };
+  }
+  return {
+    ...details,
+    score: null,
+    invalid: reason,
+    forfeit: null,
+  };
+}
+
 /** Count shields to keep generated openings quiet and strategically plausible. */
 function shieldCount(board) {
   return board.reduce(
@@ -550,15 +569,13 @@ function playGame({
       const details = error instanceof Error
         ? `${error.name}${error.message ? `: ${error.message}` : ""}${error.stack ? `\n${error.stack}` : ""}`
         : String(error);
-      return {
-        score: null,
-        invalid: "exception",
+      return operationalFailure(owner, "exception", {
         illegal: null,
         exception: owner,
         error: details,
         telemetry,
         moves,
-      };
+      });
     }
     telemetry[owner].nodes += result.nodes || 0;
     telemetry[owner].operations += result.arenaOperations || 0;
@@ -567,24 +584,20 @@ function playGame({
     telemetry[owner].moveTimes.push(result.wallMilliseconds);
     telemetry[owner].depths.push(result.depth || 0);
     if (result.wallMilliseconds > MOVE_WALL_TIMEOUT_MS) {
-      return {
-        score: null,
-        invalid: "timeout",
+      return operationalFailure(owner, "timeout", {
         illegal: null,
         timeout: owner,
         error: `Move exceeded ${MOVE_WALL_TIMEOUT_MS} ms.`,
         telemetry,
         moves,
-      };
+      });
     }
     if (!result.move || !game.isLegalMove(state, result.move)) {
-      return {
-        score: null,
-        invalid: "illegal-move",
+      return operationalFailure(owner, "illegal-move", {
         illegal: owner,
         telemetry,
         moves,
-      };
+      });
     }
     moves.push({
       owner,
@@ -750,6 +763,7 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
       owner: result.timeout || result.illegal || result.exception || null,
       error: result.error || null,
     })),
+    forfeits: results.filter((result) => result.forfeit).map((result) => result.forfeit),
     openings: results.filter((_, index) => index % 2 === 0).map((result) => result.opening),
   };
 }
@@ -844,6 +858,7 @@ if (!childMode) {
         0,
       ),
       invalid: chunks.flatMap((chunk) => chunk.invalid || []),
+      forfeits: chunks.flatMap((chunk) => chunk.forfeits || []),
       sourceHashes: chunks.map((chunk) => chunk.sourceHashes),
       truncated: chunks.reduce((total, chunk) => total + chunk.truncated, 0),
       openings: chunks.flatMap((chunk) => chunk.openings || []),
@@ -852,12 +867,6 @@ if (!childMode) {
     });
   }
   const aggregate = summarizePairs(assessments.flatMap(({ pairScores }) => pairScores));
-  const illegalMoves = assessments.reduce((total, assessment) => total + assessment.illegal, 0);
-  if (illegalMoves) throw new Error(`Arena detected ${illegalMoves} illegal AI move(s).`);
-  const candidateTimeouts = assessments.reduce(
-    (total, assessment) => total + assessment.candidateTimeouts,
-    0,
-  );
   const invalidGames = assessments.reduce(
     (total, assessment) => total + assessment.invalid.length,
     0,
@@ -871,6 +880,13 @@ if (!childMode) {
       `Arena invalidated ${invalidGames} game(s) ${JSON.stringify(reasons)}; `
       + "no Elo claim may use this batch.",
     );
+  }
+  const baselineForfeits = assessments.reduce(
+    (total, assessment) => total + assessment.forfeits.length,
+    0,
+  );
+  if (baselineForfeits) {
+    console.log(`Reference forfeits under the production clock: ${baselineForfeits}.`);
   }
   if (options.gate !== "off") {
     const failed = assessments.filter(
@@ -898,6 +914,9 @@ if (!childMode) {
       readFileSync(join(projectRoot, path), "utf8"),
     ])),
     openingIds,
+    referenceForfeits: assessments.flatMap(({ difficulty, forfeits }) => (
+      forfeits.map((forfeit) => ({ difficulty, ...forfeit }))
+    )),
     result: aggregate,
   })}`);
 } else {

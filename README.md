@@ -88,11 +88,13 @@ node scripts/elo_benchmark.mjs \
 
 The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
 results, estimated Elo with a paired-bootstrap 95% interval, illegal moves, timeouts, and average search time.
-Any timeout, illegal move, exception, truncated pair, or malformed child result invalidates the entire batch;
-partial games cannot become strength evidence. Each AI receives the real Red or Blue state without perspective
-normalization, so side-specific objective errors are exercised directly. Ultra pairs run in bounded isolated
-chunks. An immutable candidate snapshot, semantic rule hash, executable-bundle hashes, operation counter, and
-run manifest make each comparison reproducible. A known-inferior sentinel must fail the integrity suite.
+Any candidate timeout, illegal move, exception, truncated pair, or malformed child result invalidates the entire
+batch; partial candidate games cannot become strength evidence. A reference-engine operational failure is an
+explicit forfeit under the same 11-second game clock and is reported in the manifest. Each AI receives the real
+Red or Blue state without perspective normalization, so side-specific objective errors are exercised directly.
+Ultra pairs run in bounded isolated chunks. An immutable candidate snapshot, semantic rule hash, executable-
+bundle hashes, operation counter, and run manifest make each comparison reproducible. A known-inferior candidate
+must fail the integrity suite.
 
 The Pages workflow gates every deployment on unit tests, arena-integrity qualification, the tactical corpus,
 search-speed non-regression, 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra mixed-opening
