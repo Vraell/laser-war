@@ -22,24 +22,23 @@ Features include:
 Ultra unlocks after defeating Hard. Progress and the current match are stored locally in the browser and
 survive game updates.
 
-Ultra combines iterative deepening, alpha-beta principal-variation search, transposition bounds, history and
-killer ordering, and a selective tactical extension. It checks every legal mate-in-one before pruning the root,
-and widens the root with live-beam moves when the current volley is active, the board is late, or route pressure
-shows that immediate counterplay is necessary. Quiet turns target four seconds; developed or unstable positions
-can progressively use six, eight, or at most ten seconds. Search runs in a Web Worker and keeps the interface
-responsive. Turn-local search tables are reset before every move so stale ordering cannot hide a new tactic.
-A separate proof-number-style solver
-certifies short forcing lines in offline analysis and tactical regression tests; an always-on production prepass
-was removed after ablation testing showed that ordinary search used the same compute more effectively.
+Ultra combines iterative deepening, principal-variation alpha-beta search, transposition bounds, history and
+killer ordering, late-move reductions, and lazy child validation. It checks every legal mate-in-one before root
+pruning, preserves forcing live-beam moves, and rejects roots that allow an immediate legal king hit when a safe
+alternative exists. A bounded threat-space prepass proves short forcing attacks in tactical positions, while an
+exact late-game solver replaces heuristic search when the remaining tree is small enough. Quiet turns target
+four seconds; developed or unstable positions can progressively use six, eight, or at most ten seconds. Search
+runs in a Web Worker and keeps the interface responsive. Turn-local ordering and partial-search state are reset
+before every move so stale evidence cannot hide a new tactic.
 During quiet openings, Ultra varies its play only among moves tied in both the deepest completed root score and
 the strategic evaluation, with no worse immediate shield exchange. This provides different games without
 using a shallow search tie to select a strategically weaker move.
 
-The static evaluation is intentionally small and auditable. It scores surviving shield material, permanent
-one-king laser assignments, exact per-laser route costs, and current king exposure. Every shield has the same
-material value because shields occupy fixed positions and never move. A simultaneous exposure is neutral
-because both lasers fire together. Ultra also rejects root moves that let the opponent claim a permanent laser
-assignment when a safe alternative exists.
+The static evaluation is intentionally small and auditable. Its coefficients were fitted on independently held
+out games with monotonic sign constraints, then screened through tactical and arena tests. It scores surviving
+friendly and opposing shields, the nearest and reserve laser-route distances to each king, one-move attacking
+and defensive routes, and live contact with friendly shields. Internal speculative nodes use a constructive
+bounded route witness; root moves and the returned move still receive the authoritative exact legality check.
 
 ## Evaluation Reference
 
@@ -47,6 +46,10 @@ The complete evaluation is documented as pure game logic, with every term, sign 
 worked numerical example: [LaTeX source](docs/ULTRA_EVALUATION.tex) and
 [PDF](docs/ULTRA_EVALUATION.pdf). The release tests compare the document's version and weights with the game,
 so either must be updated whenever the evaluation changes.
+
+Promising engine experiments, including measured results and explicit promotion criteria, are preserved in the
+[AI research roadmap](docs/AI_RESEARCH_ROADMAP.md). Failed or inconclusive ideas remain there so future work can
+build on evidence instead of repeating it.
 
 ## Release History
 
@@ -61,7 +64,7 @@ The application is static HTML, CSS, and JavaScript. No package installation or 
 Run all tests and tactical regressions:
 
 ```bash
-node --test web/*.test.mjs scripts/arena_stats.test.mjs
+node --test web/*.test.mjs scripts/arena_stats.test.mjs scripts/arena_integrity.test.mjs
 node scripts/tactical_benchmark.mjs
 ```
 
@@ -75,25 +78,30 @@ Compare every difficulty against a previous AI revision with paired, color-swapp
 
 ```bash
 node scripts/elo_benchmark.mjs \
-  --pairs 32 \
+  --pairs 64 \
   --baseline-ref HEAD \
-  --opening-plies 0,2,4,6,8,10
+  --opening-plies 0,2,4,6,8,10 \
+  --resource nodes \
+  --ultra-nodes 20000 \
+  --openings mixed
 ```
 
 The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
-results, estimated Elo with a paired bootstrap 95% interval, illegal moves, and average search time. Search
-errors count as losses instead of aborting the evidence run. Each AI receives the real Red or Blue state without
-perspective normalization, so side-specific objective errors are exercised in the arena. Difficulties run in
-isolated child processes, and Ultra's pairs are split into bounded chunks; every required result must return
-before the gate can pass. Candidate moves exceeding the production 11-second watchdog fail, and a hard process
-timeout prevents a stuck solver from blocking the pipeline indefinitely. Ultra receives a deterministic virtual
-computation budget, so machine load cannot change the completed search depth; real wall time is checked
-separately.
-The Pages workflow gates every deployment on unit tests, the tactical corpus, search-speed non-regression, and
-32 paired games at each difficulty. Every difficulty and the aggregate result must pass independently. Reported
-failures should also become fixtures in `web/fixtures/`; deterministic tactical tests and statistical match
-tests cover different failure modes. Use `--difficulties ultra`, `--seed-offset N`, and `--ultra-time 1000` for
-focused or larger-node-budget runs.
+results, estimated Elo with a paired-bootstrap 95% interval, illegal moves, timeouts, and average search time.
+Any timeout, illegal move, exception, truncated pair, or malformed child result invalidates the entire batch;
+partial games cannot become strength evidence. Each AI receives the real Red or Blue state without perspective
+normalization, so side-specific objective errors are exercised directly. Ultra pairs run in bounded isolated
+chunks. An immutable candidate snapshot, semantic rule hash, executable-bundle hashes, operation counter, and
+run manifest make each comparison reproducible. A known-inferior sentinel must fail the integrity suite.
+
+The Pages workflow gates every deployment on unit tests, arena-integrity qualification, the tactical corpus,
+search-speed non-regression, 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra mixed-opening
+pairs, and 16 additional Ultra pairs from an independent confirmation set. Every difficulty and aggregate result
+must pass independently.
+Ultra receives a deterministic computation budget so machine load cannot change completed work; the production
+11-second real-time watchdog remains a separate failure condition. Reported failures should also become fixtures
+in `web/fixtures/`; deterministic tactical tests and statistical match tests cover different failure modes. Use
+`--difficulties ultra`, `--seed-offset N`, and `--ultra-nodes N` for focused or larger-budget runs.
 
 Analyze a copied English or French match log with a wider offline Ultra search:
 

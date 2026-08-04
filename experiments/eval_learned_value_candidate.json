@@ -1,0 +1,155 @@
+{
+  "format": 1,
+  "label": "learned-monotonic-value-v1",
+  "productionBaseline": "v0.13.6 / 6536122",
+  "perspective": "side-to-move",
+  "featureNames": [
+    "shieldBalance",
+    "attackTempo",
+    "reserveTempo",
+    "dedicatedLaserBalance",
+    "oneMoveRouteBalance",
+    "liveKingBalance",
+    "cascadeKingBalance",
+    "liveShieldBalance"
+  ],
+  "monotonicConstraints": {
+    "shieldBalance": "positive",
+    "attackTempo": "positive",
+    "reserveTempo": "positive",
+    "dedicatedLaserBalance": "positive",
+    "oneMoveRouteBalance": "positive",
+    "liveKingBalance": "positive",
+    "cascadeKingBalance": "positive",
+    "liveShieldBalance": "positive"
+  },
+  "logOddsIntercept": 0.0020315334180055905,
+  "logOddsWeights": {
+    "shieldBalance": 0.19647415970729132,
+    "attackTempo": 0.2885771583215307,
+    "reserveTempo": 0.34681649069319137,
+    "dedicatedLaserBalance": 0,
+    "oneMoveRouteBalance": 1.0142787073915975,
+    "liveKingBalance": 0,
+    "cascadeKingBalance": 0,
+    "liveShieldBalance": 0.3034067884726798
+  },
+  "enginePointsPerLogOdds": 300,
+  "engineIntercept": 0.6094600254016771,
+  "engineWeights": {
+    "shieldBalance": 58.9422479121874,
+    "attackTempo": 86.57314749645921,
+    "reserveTempo": 104.0449472079574,
+    "dedicatedLaserBalance": 0,
+    "oneMoveRouteBalance": 304.2836122174793,
+    "liveKingBalance": 0,
+    "cascadeKingBalance": 0,
+    "liveShieldBalance": 91.02203654180394
+  },
+  "clamp": {
+    "minimum": -9000,
+    "maximum": 9000
+  },
+  "evidence": {
+    "promotionReady": false,
+    "gates": {
+      "noLeakage": true,
+      "symmetry": true,
+      "monotonic": true,
+      "testMeanImprovement": true,
+      "testConfidence": false,
+      "dedicatedCoverage": false,
+      "rareTestCoverage": false
+    },
+    "metrics": {
+      "baseline": {
+        "train": {
+          "logLoss": 0.6527675122086154,
+          "brier": 0.2147098090580669,
+          "accuracy": 0.6635662769561989,
+          "calibrationError": 0.0851858418725552
+        },
+        "validation": {
+          "logLoss": 0.6113204981199694,
+          "brier": 0.1963127660054417,
+          "accuracy": 0.7440555101932808,
+          "calibrationError": 0.14058010508754526
+        },
+        "test": {
+          "logLoss": 0.6018266686808105,
+          "brier": 0.20153977347529797,
+          "accuracy": 0.7095824906800507,
+          "calibrationError": 0.10535050682083569
+        }
+      },
+      "candidate": {
+        "train": {
+          "logLoss": 0.595199343212108,
+          "brier": 0.19439688919935877,
+          "accuracy": 0.6501610724562418,
+          "calibrationError": 0.06265211993988157
+        },
+        "validation": {
+          "logLoss": 0.5383797530707147,
+          "brier": 0.17191285294145364,
+          "accuracy": 0.7149609978944348,
+          "calibrationError": 0.08325697080340334
+        },
+        "test": {
+          "logLoss": 0.567225943518141,
+          "brier": 0.1844009850726013,
+          "accuracy": 0.6587531844848917,
+          "calibrationError": 0.1003735503039279
+        }
+      }
+    },
+    "testLogLossDelta": {
+      "mean": 0.034600725162669654,
+      "low": -0.009477956182607713,
+      "high": 0.07393192652650982,
+      "groups": 42
+    },
+    "coefficientConfidence95": {
+      "shieldBalance": {
+        "low": 0,
+        "high": 0.47428063535143017,
+        "zeroRate": 0.0375
+      },
+      "attackTempo": {
+        "low": 0.1287768562032023,
+        "high": 0.4348866431049895,
+        "zeroRate": 0
+      },
+      "reserveTempo": {
+        "low": 0.1467239526225402,
+        "high": 0.6836791168102665,
+        "zeroRate": 0
+      },
+      "dedicatedLaserBalance": {
+        "low": 0,
+        "high": 1.6250079857734374,
+        "zeroRate": 0.7625
+      },
+      "oneMoveRouteBalance": {
+        "low": 0.7420910019918396,
+        "high": 1.269788163556205,
+        "zeroRate": 0
+      },
+      "liveKingBalance": {
+        "low": 0,
+        "high": 0.3328329177214182,
+        "zeroRate": 0.6875
+      },
+      "cascadeKingBalance": {
+        "low": 0,
+        "high": 0.48763666469033007,
+        "zeroRate": 0.825
+      },
+      "liveShieldBalance": {
+        "low": 0,
+        "high": 0.839235950601002,
+        "zeroRate": 0.1125
+      }
+    }
+  }
+}

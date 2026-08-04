@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const projectRoot = resolve(import.meta.dirname, "..");
-const webFiles = ["ai.js", "engine.js", "exact_routes.js", "tactics.js", "minisat.js"];
+const webFiles = ["ai.js", "engine.js", "exact_routes.js", "tactics.js", "endgame.js", "minisat.js"];
 const argumentsList = process.argv.slice(2);
 const baselineRef = argumentsList.find((argument) => !argument.startsWith("--")) || "HEAD";
 const gate = argumentsList.includes("--gate=improvement") ? "improvement" : "nonregression";
@@ -31,13 +31,20 @@ const positions = [
 async function loadRevision(label, reference = null) {
   const directory = mkdtempSync(join(tmpdir(), `laser-war-search-${label}-`));
   for (const file of webFiles) {
-    const source = reference
-      ? execFileSync("git", ["show", `${reference}:web/${file}`], {
-        cwd: projectRoot,
-        encoding: "utf8",
-        maxBuffer: 2 * 1024 * 1024,
-      })
-      : readFileSync(join(projectRoot, "web", file), "utf8");
+    let source;
+    try {
+      source = reference
+        ? execFileSync("git", ["show", `${reference}:web/${file}`], {
+          cwd: projectRoot,
+          encoding: "utf8",
+          maxBuffer: 2 * 1024 * 1024,
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+        : readFileSync(join(projectRoot, "web", file), "utf8");
+    } catch (error) {
+      if (file !== "endgame.js") throw error;
+      source = "export {};\n";
+    }
     writeFileSync(join(directory, file), source);
   }
   const revision = {

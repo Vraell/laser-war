@@ -13,6 +13,94 @@ versions.
 
 No unreleased changes.
 
+## v0.14.0 - 2026-08-03
+
+### Ultra search
+
+- Reworked Ultra around iterative deepening principal-variation search with
+  bounded transposition entries, history and killer ordering, lazy child
+  validation, late-move reductions, and a root shortlist rebuilt after every
+  completed depth.
+- Added an unconditional exact mate-in-one scan and a root survival check.
+  Confirmed surviving defenses remain eligible even when ordinary root pruning
+  would discard them; an interrupted safety proof is treated as unknown rather
+  than as evidence that a move is safe.
+- Added a bounded threat-space solver for concrete tactical positions and an
+  exact late-game solver for sufficiently small trees. The live prepass accepts
+  only constructive route witnesses and returns `unknown` instead of starting
+  an uninterruptible exact proof. Interrupted proofs are never converted into
+  wins, losses, or exact cache data.
+- Removed speculative exact-route solving from every internal leaf. Internal
+  nodes now require a constructive legal route witness, while root contenders
+  and the returned move still receive authoritative exact validation. This
+  concentrates the expensive solver on decisions that can actually be played.
+- Retained early-game variety only among deepest-search ties with equivalent
+  strategic value and shield exchange, preserving strength while avoiding a
+  deterministic opening script.
+
+### Evaluation and data
+
+- Replaced the accumulated hand-tuned static score with a smaller monotonic
+  outcome-fitted model. The retained features are friendly and opposing shield
+  counts, nearest and reserve route proximity to both kings, one-move routes,
+  and a penalty for live contact with friendly shields.
+- Trained on 192 games and 1,143 positions, with game-level train/holdout
+  separation. Holdout log loss improved by `0.06831` with a 95% game-bootstrap
+  interval of `0.01992` to `0.11430`; independent accuracy improved from
+  `66.9%` to `72.0%`.
+- Rejected raw laser-assignment, exposure, and cascade terms after conditional
+  ablation. They remain documented research rather than silently surviving as
+  redundant or misleading weights.
+- Rebuilt the pure-logic LaTeX and PDF evaluation reference for the shipped
+  model and kept executable checks for its version and exact coefficients.
+
+### Arena and release qualification
+
+- Made candidate revisions immutable during a run and hashed the complete AI,
+  rules, exact solver, judge, statistics, workflow, and integrity bundle into
+  the result manifest. Candidate and baseline must also share the same semantic
+  rule hash.
+- Changed all operational failures to fail closed. A timeout, illegal move,
+  exception, malformed output, missing game, or truncated color-swapped pair
+  invalidates the batch instead of being counted as usable Elo evidence.
+- Added a fixed-size paired-bootstrap release gate and kept the experimental
+  sequential test advisory. Identical-engine qualification must pass, while a
+  deliberately weak first-legal engine must fail.
+- Added an independent confirmation opening set spanning quiet, asymmetric,
+  damaged-shield, tactical, side-inverted, and late positions. Deployment now
+  requires 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra
+  mixed-opening pairs, and 16 additional Ultra confirmation pairs.
+
+### Research path
+
+- Preserved seven measured follow-up paths in
+  `docs/AI_RESEARCH_ROADMAP.md`: a selective tactical-potential graph,
+  response-expanded opening policy, packed/native search core, proof-number
+  search, retrograde late-game tables, a joint-route oracle, and a learned
+  residual value model.
+- Kept reproducible experiment implementations, reports, fixtures, and rejected
+  results in `experiments/` so future engine work starts from measured evidence.
+
+#### Arena strength
+
+The local release qualifier compares `v0.14.0` with `v0.13.6` over 16 paired,
+color-swapped openings per difficulty using deterministic work budgets.
+Intervals are 95% paired-bootstrap confidence intervals; they are relative
+estimates, not absolute ratings. Deployment repeats 64 mixed pairs for the
+standard difficulties, 32 mixed Ultra pairs, and a separate 16-pair Ultra
+confirmation sample.
+
+| Difficulty | Candidate W-D-L | Estimated Elo change | 95% interval |
+| --- | ---: | ---: | ---: |
+| Easy | 15-2-15 | 0 | 0 to 0 |
+| Medium | 15-2-15 | 0 | 0 to 0 |
+| Hard | 15-2-15 | 0 | 0 to 0 |
+| Ultra | 24-0-8 | +191 | +44 to +394 |
+
+The independent 16-pair Ultra confirmation sample scored `23-2-7`, estimated
+at `+191 Elo` with a 95% interval of `+66` to `+364`. Both Ultra batches
+completed with zero timeouts, exceptions, illegal moves, or truncated pairs.
+
 ## v0.13.6 - 2026-07-30
 
 ### Ultra counterplay

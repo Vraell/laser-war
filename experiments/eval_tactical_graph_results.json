@@ -1,0 +1,117 @@
+{
+  "format": 1,
+  "date": "2026-08-03",
+  "scope": "isolated tactical-potential evaluator; no production integration",
+  "historical": {
+    "development": {
+      "cases": 1,
+      "legalMoves": 110,
+      "topMoveSuccesses": 1,
+      "pairwiseAccuracy": 1.0,
+      "routeOnlyAccuracy": 0.8517156863
+    },
+    "heldOut": {
+      "cases": 3,
+      "legalMoves": 238,
+      "topMoveSuccesses": 3,
+      "pairwiseAccuracy": 0.8882783883,
+      "routeOnlyAccuracy": 0.8058608059,
+      "ablationPairwiseAccuracy": {
+        "terminal": 0.8663485637,
+        "certificate": 0.8891941392,
+        "tempo": 0.8887362637,
+        "defensiveResources": 0.8882783883,
+        "assignment": 0.8882783883,
+        "cascade": 0.8882783883,
+        "routeGeometry": 0.8875915751,
+        "shields": 0.8880494505
+      }
+    },
+    "all": {
+      "cases": 4,
+      "legalMoves": 348,
+      "topMoveSuccesses": 4,
+      "pairwiseAccuracy": 0.9162087912,
+      "routeOnlyAccuracy": 0.817324526
+    }
+  },
+  "knownRanks": [
+    {
+      "case": "mate-in-one defense outside old root shortlist",
+      "bestPreferredRank": 1,
+      "knownDefenseRank": 7,
+      "reportedBlunderRank": 28,
+      "legalMoves": 110
+    },
+    {
+      "case": "only legal survival under two-stage attack",
+      "bestPreferredRank": 1,
+      "knownDefenseRank": 1,
+      "reportedBlunderRank": 97,
+      "legalMoves": 99
+    },
+    {
+      "case": "take mate in one instead of the reported choke",
+      "bestPreferredRank": 1,
+      "knownDefenseRank": 1,
+      "reportedBlunderRank": 7,
+      "legalMoves": 40
+    },
+    {
+      "case": "avoid permanent single-laser assignment concession",
+      "bestPreferredRank": 1,
+      "reportedBlunderRank": 93,
+      "legalMoves": 99,
+      "pairwiseAccuracy": 0.6648351648,
+      "routeOnlyAccuracy": 0.4175824176
+    }
+  ],
+  "adversarial": {
+    "openButHarmless": {
+      "nearestRoute": 1,
+      "immediateWins": 0,
+      "loadedThreats": 0
+    },
+    "enforceableRoute": {
+      "nearestRoute": 0,
+      "immediateWins": 8,
+      "certificate": "proven"
+    },
+    "cascadeDecoy": {
+      "kingChains": 1,
+      "defensiveMoves": 5,
+      "certificate": "unknown"
+    },
+    "splitAssignment": {
+      "masks": [1, 2],
+      "topScore": -1711.87,
+      "bottomScore": 1711.87,
+      "antisymmetryError": 0
+    },
+    "routeRankingTrap": {
+      "routeOnlyBlunderAdvantage": 9,
+      "graphRepairedRanking": true
+    }
+  },
+  "runtime": {
+    "coldObserved": {
+      "evaluations": 348,
+      "medianMs": 3.724708,
+      "p95Ms": 42.765459,
+      "maxMs": 728.868042,
+      "endToEndMs": 30279.216458
+    },
+    "repeatObserved": {
+      "evaluations": 348,
+      "medianMs": 0.970708,
+      "p95Ms": 8.87875,
+      "maxMs": 149.555333,
+      "endToEndMs": 9717.8845
+    }
+  },
+  "recommendation": {
+    "fullLeafEvaluator": "do-not-promote",
+    "rootAndOfflineOracle": "promote-to-arena-candidate",
+    "reason": "Held-out ranking improves materially, but tail latency and redundant feature ablations are unsuitable for every search leaf."
+  }
+}

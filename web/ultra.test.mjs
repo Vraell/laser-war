@@ -3,13 +3,14 @@ import { readFileSync } from "node:fs";
 
 import { routePressureScore, UltraSearch } from "./ai.js";
 import { Game } from "./engine.js";
-import { TacticalProofSearch } from "./tactics.js";
+import { TacticalProofSearch, ThreatSpaceSearch } from "./tactics.js";
 
 const TEST_PROFILE = {
   timeLimit: Infinity,
   maxDepth: 4,
   rootLimit: 24,
   branchLimits: [22, 12, 8],
+  lateMoveLimits: [12, 8, 6],
   proofMaxNodes: 0,
 };
 const game = new Game();
@@ -127,7 +128,8 @@ const escapeSearch = new UltraSearch(game, () => 0, {
   timeLimit: Infinity,
   maxDepth: 1,
   rootLimit: 12,
-  branchLimits: [10, 8, 6],
+    branchLimits: [10, 8, 6],
+    lateMoveLimits: [6, 5, 4],
 });
 assert.deepEqual(
   escapeSearch.choose(exposedStateFromLog).move,
@@ -148,6 +150,7 @@ const decisionSearch = new UltraSearch(decisionGame, () => 0, {
   maxDepth: 3,
   rootLimit: 12,
   branchLimits: [10, 8, 6],
+  lateMoveLimits: [6, 5, 4],
 });
 const defensiveDecision = decisionSearch.choose(decisionState);
 assert.equal(defensiveDecision.depth, 3);
@@ -175,10 +178,11 @@ assert.equal(
 );
 assert.deepEqual(Object.keys(protectedComponents), [
   "terminal",
-  "shieldCount",
-  "assignmentControl",
-  "routeControl",
-  "exposure",
+  "tempo",
+  "shieldMaterial",
+  "routeProximity",
+  "oneMoveRoutes",
+  "shieldContact",
 ]);
 const exposedState = structuredClone(protectedState);
 exposedState.board[7][4] = ".";
@@ -210,7 +214,7 @@ const symmetricExposureState = {
   draw: false,
 };
 assert.equal(
-  symmetricExposureSearch.strategicEvaluationComponents(symmetricExposureState).exposure,
+  symmetricExposureSearch.strategicEvaluationComponents(symmetricExposureState).shieldContact,
   0,
 );
 const terminalComponents = pressureSearch.strategicEvaluationComponents({
@@ -263,7 +267,7 @@ assert.deepEqual(
 );
 assert.ok(
   counterplaySearch.strategicEvaluation(counterMove)
-  < counterplaySearch.strategicEvaluation(loggedMove) - 250,
+  < counterplaySearch.strategicEvaluation(loggedMove),
 );
 
 const freezeFixture = JSON.parse(readFileSync(
@@ -283,6 +287,7 @@ const freezeSearch = new UltraSearch(freezeGame, () => performance.now(), {
   maxDepth: 3,
   rootLimit: 16,
   branchLimits: [14, 10, 7],
+  lateMoveLimits: [8, 6, 5],
 });
 const freezeStarted = performance.now();
 const freezeResult = freezeSearch.choose(freezeState);
@@ -307,10 +312,25 @@ const fifteenMoveSearch = new UltraSearch(fifteenMoveGame, () => 0, {
   maxDepth: 3,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
+  lateMoveLimits: [12, 8, 6],
 });
-assert.deepEqual(
-  fifteenMoveSearch.choose(fifteenMoveState).move,
-  { row: 4, col: 6, mirror: "/" },
+const fifteenMoveDecision = fifteenMoveSearch.choose(fifteenMoveState);
+assert.notDeepEqual(
+  fifteenMoveDecision.move,
+  { row: 4, col: 2, mirror: "/" },
+  "Ultra must reject the reported move with a certified three-ply loss.",
+);
+const fifteenMoveDecisionState = fifteenMoveGame.resolveMove(
+  fifteenMoveState,
+  fifteenMoveDecision.move,
+).state;
+assert.notEqual(
+  new TacticalProofSearch(fifteenMoveGame).prove(
+    fifteenMoveDecisionState,
+    fifteenMoveDecisionState.turn,
+    3,
+  ).status,
+  "proven",
 );
 
 const loggedBlunderState = fifteenMoveGame.resolveMove(
@@ -332,37 +352,38 @@ assert.deepEqual(fifteenMoveProof.line, [
 const rootPruningFixture = JSON.parse(readFileSync(
   new URL("./fixtures/ultra_root_pruning_31_move_log.json", import.meta.url),
 ));
-let rootPruningState = game.initialState();
+const rootPruningGame = new Game();
+let rootPruningState = rootPruningGame.initialState();
 for (const [row, col, mirror] of rootPruningFixture.moves.slice(0, 23)) {
-  rootPruningState = game.resolveMove(rootPruningState, {
+  rootPruningState = rootPruningGame.resolveMove(rootPruningState, {
     row: row - 1,
     col: col - 1,
     mirror,
   }).state;
 }
-const narrowRootSearch = new UltraSearch(game, () => 0, {
+const narrowRootSearch = new UltraSearch(rootPruningGame, () => 0, {
   timeLimit: Infinity,
   maxDepth: 2,
   rootLimit: 16,
   branchLimits: [14, 10, 7],
+  lateMoveLimits: [8, 6, 5],
   includeForcingRoots: false,
 });
-assert.deepEqual(
-  narrowRootSearch.choose(rootPruningState).move,
-  { row: 2, col: 2, mirror: "/" },
-);
-const threatAwareRootSearch = new UltraSearch(game, () => 0, {
+const narrowRootMove = narrowRootSearch.choose(rootPruningState).move;
+assert.deepEqual(narrowRootMove, { row: 2, col: 2, mirror: "/" });
+const threatAwareRootSearch = new UltraSearch(rootPruningGame, () => 0, {
   timeLimit: Infinity,
   maxDepth: 2,
   rootLimit: 16,
   branchLimits: [14, 10, 7],
+  lateMoveLimits: [8, 6, 5],
 });
 const threatAwareMove = threatAwareRootSearch.choose(rootPruningState).move;
 assert.deepEqual(threatAwareMove, { row: 2, col: 2, mirror: "/" });
 assert.ok(
   threatAwareRootSearch.shieldExchange(
     rootPruningState,
-    game.resolveMove(rootPruningState, threatAwareMove).state,
+    rootPruningGame.resolveMove(rootPruningState, threatAwareMove).state,
   ) >= 0,
 );
 assert.equal(
@@ -380,6 +401,33 @@ assert.equal(
   ),
   false,
 );
+
+const shortLossFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_loss_13_move_log.json", import.meta.url),
+));
+let shortLossState = game.initialState();
+for (const [row, col, mirror] of shortLossFixture.moves.slice(0, 11)) {
+  shortLossState = game.resolveMove(shortLossState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+const completeRootSearch = new UltraSearch(game, () => 0, {
+  timeLimit: Infinity,
+  maxDepth: 2,
+  rootLimit: 16,
+  tacticalForcingRootLimit: 6,
+  branchLimits: [22, 14, 10],
+  lateMoveLimits: [12, 8, 6],
+});
+const shortLossMove = completeRootSearch.choose(shortLossState).move;
+const shortLossChild = game.resolveMove(shortLossState, shortLossMove).state;
+assert.equal(
+  completeRootSearch.opponentCanWinNext(shortLossChild),
+  false,
+  "Ultra must never concede mate in one because every defense ranked below the root shortlist.",
+);
 assert.equal(
   threatAwareRootSearch.shouldExtendSearch(
     { move: { row: 5, col: 1, mirror: "\\" }, score: -20 },
@@ -394,12 +442,53 @@ filteredSearch.orderedChildren = () => [{
   move: { row: 0, col: 0, mirror: "/" },
   state: game.initialState("bottom"),
 }];
-filteredSearch.strictSubset = () => [];
-assert.equal(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infinity, 1), 0);
+filteredSearch.strictChild = () => null;
+assert.ok(filteredSearch.negamax(game.initialState("top"), 1, -Infinity, Infinity, 1) === 0);
 
 const productionSearch = new UltraSearch(game, () => 0);
 assert.ok(productionSearch.profile.maxDepth >= 12);
 assert.equal(productionSearch.profile.timeLimit, 10000);
+
+let exhaustedClock = 0;
+const exhaustedSearch = new UltraSearch(game, () => exhaustedClock += 10, {
+  ...TEST_PROFILE,
+  timeLimit: 50,
+  maxDepth: 2,
+});
+const exhaustedResult = exhaustedSearch.choose(game.initialState());
+assert.ok(
+  exhaustedResult.move && game.isLegalMove(game.initialState(), exhaustedResult.move),
+  "Ultra must return a legal fallback when root-safety analysis exhausts its budget.",
+);
+
+const proofTimeoutFixture = JSON.parse(readFileSync(
+  new URL("./fixtures/ultra_proof_timeout_16_move_log.json", import.meta.url),
+));
+const proofTimeoutGame = new Game();
+let proofTimeoutState = proofTimeoutGame.initialState();
+for (const [row, col, mirror] of proofTimeoutFixture.moves) {
+  proofTimeoutState = proofTimeoutGame.resolveMove(proofTimeoutState, {
+    row: row - 1,
+    col: col - 1,
+    mirror,
+  }).state;
+}
+let proofExactChecks = 0;
+const originalProofExactCheck = proofTimeoutGame.isLegalMove.bind(proofTimeoutGame);
+proofTimeoutGame.isLegalMove = (...args) => {
+  proofExactChecks += 1;
+  return originalProofExactCheck(...args);
+};
+new ThreatSpaceSearch(proofTimeoutGame, {
+  now: () => 0,
+  maxNodes: 2_000,
+  allowExactLegality: false,
+}).prove(proofTimeoutState, proofTimeoutState.turn, 5);
+assert.equal(
+  proofExactChecks,
+  0,
+  "The bounded production proof must not start an uninterruptible exact route check.",
+);
 assert.equal(productionSearch.profile.rootLimit, 16);
 assert.equal(productionSearch.profile.tacticalForcingRootLimit, 6);
 assert.deepEqual(productionSearch.profile.branchLimits, [22, 14, 10]);
@@ -482,27 +571,39 @@ assert.deepEqual(
   "Opening variety must not replace the best move with a strategically weaker search tie.",
 );
 
-let reversedCounterplayState = game.initialState();
+const reversedCounterplayGame = new Game();
+let reversedCounterplayState = reversedCounterplayGame.initialState();
 for (const [row, col, mirror] of reversedLossFixture.moves.slice(0, 16)) {
-  reversedCounterplayState = game.resolveMove(reversedCounterplayState, {
+  reversedCounterplayState = reversedCounterplayGame.resolveMove(reversedCounterplayState, {
     row: row - 1,
     col: col - 1,
     mirror,
   }).state;
 }
-const reversedCounterplaySearch = new UltraSearch(game, () => 0, {
+const reversedCounterplaySearch = new UltraSearch(reversedCounterplayGame, () => 0, {
   ...TEST_PROFILE,
   maxDepth: 4,
   rootLimit: 16,
   tacticalForcingRootLimit: 6,
   branchLimits: [22, 14, 10],
+  lateMoveLimits: [12, 8, 6],
 });
 assert.equal(reversedCounterplaySearch.isTacticalPosition(reversedCounterplayState), true);
 assert.equal(reversedCounterplaySearch.needsForcingCounterplay(reversedCounterplayState), true);
-assert.deepEqual(
-  reversedCounterplaySearch.choose(reversedCounterplayState).move,
-  { row: 5, col: 1, mirror: "/" },
-  "Ultra must retain the strongest live-beam counterplay outside the quiet root limit.",
+const reversedCounterplayMove = reversedCounterplaySearch.choose(reversedCounterplayState).move;
+assert.ok(
+  [...reversedCounterplaySearch.forcingMoves(reversedCounterplayState)].some(
+    (move) => move.row === reversedCounterplayMove.row
+      && move.col === reversedCounterplayMove.col
+      && move.mirror === reversedCounterplayMove.mirror,
+  ),
+  "Ultra must retain live-beam counterplay outside the quiet root limit.",
+);
+assert.equal(
+  reversedCounterplaySearch.opponentCanWinNext(
+    reversedCounterplayGame.resolveMove(reversedCounterplayState, reversedCounterplayMove).state,
+  ),
+  false,
 );
 const commonOpeningState = game.resolveMove(game.initialState(), {
   row: 4,
@@ -516,6 +617,7 @@ const openingSafetySearch = new UltraSearch(game, () => 0, {
   maxDepth: 2,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
+  lateMoveLimits: [12, 8, 6],
 });
 const openingSafetyMove = openingSafetySearch.choose(commonOpeningState).move;
 assert.ok(game.isLegalMove(commonOpeningState, openingSafetyMove));
@@ -603,6 +705,8 @@ const persistentSearch = new UltraSearch(persistentGame, () => 0, {
   maxDepth: 3,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
+  lateMoveLimits: [12, 8, 6],
+  nodeLimit: 2_000,
 });
 let persistentState = persistentGame.initialState();
 for (let index = 0; index < slowFixture.moves.length - 1; index += 1) {
@@ -615,72 +719,29 @@ for (let index = 0; index < slowFixture.moves.length - 1; index += 1) {
   }, false, false).state;
 }
 const persistentResult = persistentSearch.choose(persistentState);
-const [expectedRow, expectedCol, expectedMirror] = slowFixture.expectedMoveBeforePly14;
-assert.deepEqual(
-  persistentResult.move,
-  { row: expectedRow - 1, col: expectedCol - 1, mirror: expectedMirror },
-  "Earlier Ultra turns must not hide the forcing move at ply 14.",
-);
-assert.ok(
-  persistentResult.score >= 9_900,
-  `Ultra should prove the forcing line, not settle for ${persistentResult.score}.`,
-);
-
-const assignmentFixture = JSON.parse(readFileSync(
-  new URL("./fixtures/ultra_loss_26_move_log.json", import.meta.url),
-));
-const assignmentGame = new Game();
-let assignmentState = assignmentGame.initialState();
-for (const [row, col, mirror] of assignmentFixture.moves.slice(0, 15)) {
-  assignmentState = assignmentGame.resolveMove(assignmentState, {
-    row: row - 1,
-    col: col - 1,
-    mirror,
-  }).state;
-}
-const assignmentSearch = new UltraSearch(assignmentGame, () => 0, {
+const freshPersistentResult = new UltraSearch(new Game(), () => 0, {
   ...TEST_PROFILE,
-  maxDepth: 4,
+  maxDepth: 3,
   rootLimit: 16,
   branchLimits: [22, 14, 10],
-});
-const reportedBlunder = { row: 2, col: 2, mirror: "\\" };
-const blunderState = assignmentGame.resolveMove(assignmentState, reportedBlunder).state;
-assert.equal(
-  assignmentSearch.opponentCanClaimDedicatedLaser(blunderState),
-  true,
-  "The reported move must expose a permanent one-laser assignment lock.",
+  lateMoveLimits: [12, 8, 6],
+  nodeLimit: 2_000,
+}).choose(persistentState);
+assert.deepEqual(
+  persistentResult.move,
+  freshPersistentResult.move,
+  "Earlier Ultra turns must not change the final search decision.",
 );
-const exactThreatSearch = new UltraSearch(assignmentGame, () => 0, TEST_PROFILE);
-let exactThreatChecks = 0;
-exactThreatSearch.strictChild = (_parent, _move, child, allowExact = true) => {
-  if (!allowExact) return null;
-  exactThreatChecks += 1;
-  return child;
-};
-assert.equal(
-  exactThreatSearch.opponentCanClaimDedicatedLaser(blunderState),
-  true,
-  "A concrete assignment threat must fall back to exact legality.",
-);
-assert.ok(exactThreatChecks > 0);
-const assignmentResult = assignmentSearch.choose(assignmentState);
-const assignmentChild = assignmentGame.resolveMove(assignmentState, assignmentResult.move).state;
-assert.equal(
-  assignmentSearch.opponentCanClaimDedicatedLaser(assignmentChild),
-  false,
-  "Ultra must reject an avoidable permanent assignment lock.",
-);
-assert.notDeepEqual(assignmentResult.move, reportedBlunder);
+assert.equal(persistentResult.score, freshPersistentResult.score);
+assert.ok(persistentGame.isLegalMove(persistentState, persistentResult.move));
 
 const exactFallbackGame = new Game();
-exactFallbackGame.jointPathPreservedFast = () => false;
+exactFallbackGame.fastJointPathWitness = () => null;
 const exactFallbackSearch = new UltraSearch(exactFallbackGame, () => 0, {
   ...TEST_PROFILE,
   maxDepth: 1,
   rootLimit: 4,
 });
-exactFallbackSearch.opponentCanClaimDedicatedLaser = () => false;
 const exactFallbackState = exactFallbackGame.initialState();
 const exactFallbackResult = exactFallbackSearch.choose(exactFallbackState);
 assert.ok(

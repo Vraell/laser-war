@@ -1,5 +1,6 @@
-import { BOARD_SIZE, Cell } from "./engine.js?v=0.13.6";
-import { TacticalProofSearch } from "./tactics.js?v=0.13.6";
+import { BOARD_SIZE, MIDDLE_ROW, Cell } from "./engine.js?v=0.14.0";
+import { endgameComplexity, ExactLateGameSolver, ExactOutcome } from "./endgame.js?v=0.14.0";
+import { ThreatSpaceSearch } from "./tactics.js?v=0.14.0";
 
 const ULTRA_PROFILE = {
   timeLimit: 10000,
@@ -7,14 +8,35 @@ const ULTRA_PROFILE = {
   rootLimit: 16,
   tacticalForcingRootLimit: 6,
   branchLimits: [22, 14, 10],
-  proofMaxNodes: 0,
+  lateMoveLimits: [12, 8, 6],
+  proofMaxNodes: 2_000,
+  proofPlies: 5,
+  endgameMaxNodes: 25_000,
+  endgameTimeLimit: 350,
+  maxInternalExactChecks: 0,
 };
 const MATE_SCORE = 10_000;
+const PREVIEW_DIRECTIONS = Object.freeze({
+  N: [-1, 0],
+  E: [0, 1],
+  S: [1, 0],
+  W: [0, -1],
+});
+const PREVIEW_SLASH = Object.freeze({ N: "E", E: "N", S: "W", W: "S" });
+const PREVIEW_BACKSLASH = Object.freeze({ N: "W", W: "N", S: "E", E: "S" });
 export const EVALUATION_WEIGHTS = Object.freeze({
   mate: MATE_SCORE,
+  tempo: -1_700.6308845157791,
+  ownShield: 90.43228663345721,
+  opponentShield: -45.328692796001064,
+  attackNearestProximity: 174.36719062170332,
+  dangerNearestProximity: -5.4963762962904115,
+  attackReserveProximity: 22.103736462008076,
+  dangerReserveProximity: -36.79374075489845,
+  attackOneMoveRoute: 396.52436486142835,
+  dangerOneMoveRoute: -164.9882875478994,
+  dangerShieldContact: -123.57179042246001,
   shieldCount: 25,
-  assignment: 1_218,
-  exposure: 540,
   routeLimit: 12,
   routeRaceLinear: 67,
   routeReserveLinear: 42,
@@ -23,7 +45,12 @@ export const EVALUATION_WEIGHTS = Object.freeze({
   routePerLaserQuadratic: 8,
 });
 
-class SearchInterrupted extends Error {}
+class SearchInterrupted extends Error {
+  constructor() {
+    super("Ultra search budget exhausted.");
+    this.name = "SearchInterrupted";
+  }
+}
 
 function moveKey(move) {
   return ((move.row * BOARD_SIZE + move.col) * 2) + Number(move.mirror === Cell.BACKSLASH);
@@ -42,6 +69,34 @@ function boundedRouteCost(costs, player) {
     costs[player] ?? EVALUATION_WEIGHTS.routeLimit,
     EVALUATION_WEIGHTS.routeLimit,
   );
+}
+
+/** Trace one virtual beam through a hypothetical placement and removed shields. */
+function previewBeam(board, source, move, removed = []) {
+  let [row, col, direction] = source;
+  for (let steps = 0; steps < BOARD_SIZE * BOARD_SIZE * 4; steps += 1) {
+    row += PREVIEW_DIRECTIONS[direction][0];
+    col += PREVIEW_DIRECTIONS[direction][1];
+    if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return {};
+    let cell = row === move.row && col === move.col ? move.mirror : board[row][col];
+    if (cell === Cell.SHIELD && removed.some(([r, c]) => r === row && c === col)) {
+      cell = Cell.EMPTY;
+    }
+    if (cell === Cell.SHIELD) return { hitShield: [row, col] };
+    if (cell === Cell.TOP_KING) return { hitKing: "top" };
+    if (cell === Cell.BOTTOM_KING) return { hitKing: "bottom" };
+    if (cell === Cell.SLASH) direction = PREVIEW_SLASH[direction];
+    else if (cell === Cell.BACKSLASH) direction = PREVIEW_BACKSLASH[direction];
+  }
+  return {};
+}
+
+/** Trace both fixed sources against one virtual placement. */
+function previewVolley(board, move, removed = []) {
+  return [
+    previewBeam(board, [MIDDLE_ROW, -1, "E"], move, removed),
+    previewBeam(board, [MIDDLE_ROW, BOARD_SIZE, "W"], move, removed),
+  ];
 }
 
 /** Score attack tempo and per-laser control from one player's perspective. */
@@ -202,13 +257,15 @@ export class UltraSearch {
     this.forcingCache = new Map();
     this.forcedExposureCache = new Map();
     this.rootSurvivalCache = new Map();
-    this.assignmentThreatCache = new Map();
+    this.rootSearchChildren = [];
     this.stateKeys = new WeakMap();
     this.shieldCountCache = new WeakMap();
     this.bestCompleted = null;
+    this.endgameTablebase = new Map();
+    this.internalExactChecks = 0;
   }
 
-  /** Discard turn-local heuristics so an old root cannot bias a new position. */
+  /** Reset turn-local bounds while retaining bounded immutable position knowledge. */
   resetForTurn() {
     this.nodes = 0;
     this.activeDepth = 0;
@@ -216,20 +273,28 @@ export class UltraSearch {
     this.ordering.clear();
     this.rootScores.clear();
     this.history.clear();
+    this.trimPersistentCaches();
     this.killers.clear();
     this.cache.clear();
-    this.childrenCache.clear();
-    this.legalityCache.clear();
-    this.fastLegalityCache.clear();
-    this.evaluationCache.clear();
-    this.orderingEvaluationCache.clear();
-    this.forcingCache.clear();
-    this.forcedExposureCache.clear();
-    this.rootSurvivalCache.clear();
-    this.assignmentThreatCache.clear();
-    this.stateKeys = new WeakMap();
-    this.shieldCountCache = new WeakMap();
+    this.rootSearchChildren = [];
     this.bestCompleted = null;
+    this.internalExactChecks = 0;
+  }
+
+  /** Bound cross-turn caches so match-long reuse cannot grow without limit. */
+  trimPersistentCaches() {
+    for (const [cache, limit] of [
+      [this.childrenCache, 8_000],
+      [this.legalityCache, 8_000],
+      [this.fastLegalityCache, 8_000],
+      [this.evaluationCache, 12_000],
+      [this.orderingEvaluationCache, 12_000],
+      [this.forcingCache, 12_000],
+      [this.forcedExposureCache, 8_000],
+      [this.rootSurvivalCache, 8_000],
+    ]) {
+      if (cache.size > limit) cache.clear();
+    }
   }
 
   /** Choose a move with iterative deepening under the Ultra budget. */
@@ -253,18 +318,48 @@ export class UltraSearch {
         elapsed: this.now() - started,
       };
     }
+    const complexity = endgameComplexity(this.game, state);
+    const endgameMaxNodes = this.profile.endgameMaxNodes ?? 0;
+    if (endgameMaxNodes > 0
+      && (complexity.placementSquares <= 12 || fastChildren.length <= 20)) {
+      const nodeLimit = Math.min(
+        endgameMaxNodes,
+        this.profile.nodeLimit ?? Infinity,
+      );
+      const exact = new ExactLateGameSolver(this.game, {
+        tablebase: this.endgameTablebase,
+        now: this.now,
+        maxNodes: nodeLimit,
+        timeLimit: this.profile.endgameTimeLimit ?? 350,
+      }).solve(state);
+      if (exact.status === "exact" && exact.bestMove) {
+        const score = exact.outcome === ExactOutcome.WIN
+          ? MATE_SCORE - (exact.witnessPlies || 1)
+          : exact.outcome === ExactOutcome.LOSS
+            ? -MATE_SCORE + (exact.witnessPlies || 1)
+            : 0;
+        return {
+          move: exact.bestMove,
+          score,
+          depth: exact.witnessPlies || 1,
+          nodes: fastChildren.length + exact.nodes,
+          elapsed: this.now() - started,
+        };
+      }
+    }
     const proofMaxNodes = timing.latePosition || this.isTacticalPosition(state)
-      ? this.profile.proofMaxNodes ?? 5000
+      ? this.profile.proofMaxNodes ?? 0
       : 0;
     const proofDeadline = Math.min(
       this.deadline,
       started + Math.min(1000, this.profile.timeLimit * 0.1),
     );
     const proof = proofMaxNodes > 0
-      ? new TacticalProofSearch(this.game, {
+      ? new ThreatSpaceSearch(this.game, {
         now: this.now,
         deadline: proofDeadline,
         maxNodes: proofMaxNodes,
+        allowExactLegality: false,
       }).prove(state, state.turn, this.profile.proofPlies ?? 5)
       : { status: "unknown", nodes: 0 };
     if (proof.status === "proven" && proof.line.length) {
@@ -288,22 +383,18 @@ export class UltraSearch {
       nodes: 0,
       elapsed: 0,
     };
-    this.childrenCache.set(rootKey, children);
+    this.rootSearchChildren = children;
 
     const orderedFallback = this.orderedChildren(state, 0);
     const fallback = orderedFallback.find(
       ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
-        && !this.opponentCanClaimDedicatedLaser(child)
+        && this.rootMoveSurvivesBudget(child)
         && this.strictChild(state, move, child, false),
     ) || orderedFallback.find(
       ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
         && this.strictChild(state, move, child, false),
     ) || orderedFallback.find(
       ({ move, state: child }) => this.strictChild(state, move, child, false),
-    ) || orderedFallback.find(
-      ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
-        && !this.opponentCanClaimDedicatedLaser(child)
-        && this.strictChild(state, move, child),
     ) || orderedFallback.find(
       ({ move, state: child }) => child.winner !== (state.turn === "top" ? "bottom" : "top")
         && this.strictChild(state, move, child),
@@ -360,12 +451,15 @@ export class UltraSearch {
           useHardDeadline = true;
         }
         previousIteration = result;
+        this.rootSearchChildren = this.selectRootChildren(state);
         this.reportProgress("searching", true);
         const now = this.now();
         const iterationElapsed = now - iterationStarted;
         const nextIterationEstimate = iterationElapsed * (depth >= 4 ? 3 : 1.8);
         const iterationDeadline = useHardDeadline ? configuredDeadline : timing.softDeadline;
-        if (Math.abs(bestScore) >= MATE_SCORE - 100) break;
+        // A winning line is constructive. A reported loss is not conclusive while
+        // internal move reduction remains selective, so continue looking for escapes.
+        if (bestScore >= MATE_SCORE - 100) break;
         if (depth >= 3 && (
           now >= iterationDeadline
           || now + Math.max(50, nextIterationEstimate) >= iterationDeadline
@@ -425,12 +519,19 @@ export class UltraSearch {
     return scoreSwing >= 180 || (moveChanged && scoreSwing >= 80);
   }
 
-  /** Keep strong quiet roots plus every move that changes the live volley. */
+  /** Keep strong quiet roots plus every tactical move for deeper iterations. */
   selectRootChildren(state) {
     const ordered = this.orderedChildren(state, 0);
+    const previousScores = this.rootScores.get(this.keyForState(state));
+    if (previousScores) {
+      ordered.sort((left, right) => (
+        (previousScores.get(moveKey(right.move)) ?? -Infinity)
+        - (previousScores.get(moveKey(left.move)) ?? -Infinity)
+      ));
+    }
     const selected = ordered.slice(0, this.profile.rootLimit);
     if (this.profile.includeForcingRoots === false) return selected;
-    const expandAll = this.shouldExpandRoot(state);
+    const expandAll = this.shouldExpandRoot(state) || this.isTacticalPosition(state);
     const forcingLimit = expandAll
       ? Infinity
       : this.needsForcingCounterplay(state)
@@ -469,12 +570,29 @@ export class UltraSearch {
     const beta = Infinity;
     const key = this.keyForState(state);
     const previousScores = this.rootScores.get(key);
-    const children = this.orderedChildren(state, 0);
+    const children = depth === 1
+      ? this.orderedChildren(state, 0)
+      : [...this.rootSearchChildren];
     if (previousScores) {
       children.sort((left, right) => (
         (previousScores.get(moveKey(right.move)) ?? -Infinity)
         - (previousScores.get(moveKey(left.move)) ?? -Infinity)
       ));
+    }
+    // Establish alpha only from a certified legal principal move. Fast witnesses
+    // prove legality; an exact check is needed only if no fast witness survives.
+    let legalPrincipal = children.findIndex(
+      ({ move, state: child }) => this.strictChild(state, move, child, false),
+    );
+    if (legalPrincipal < 0) {
+      legalPrincipal = children.findIndex(
+        ({ move, state: child }) => this.strictChild(state, move, child),
+      );
+    }
+    if (legalPrincipal < 0) throw new Error("Ultra search found no fully legal root move.");
+    if (legalPrincipal > 0) {
+      const [principal] = children.splice(legalPrincipal, 1);
+      children.unshift(principal);
     }
     const ranked = [];
     let firstChild = true;
@@ -491,51 +609,37 @@ export class UltraSearch {
         }
       }
       ranked.push({ move, state: child, score });
-      if (score > alpha && this.strictChild(state, move, child, false)) alpha = score;
+      if (score > alpha && (
+        this.strictChild(state, move, child, false)
+        || this.strictChild(state, move, child)
+      )) alpha = score;
+    }
+    const opponent = state.turn === "top" ? "bottom" : "top";
+    for (const candidate of ranked) {
+      if (candidate.state.winner === opponent) {
+        candidate.score = -MATE_SCORE + 1;
+      } else if (!candidate.state.winner && this.opponentCanWinNext(candidate.state)) {
+        candidate.score = Math.min(candidate.score, -MATE_SCORE + 2);
+      }
     }
     ranked.sort((left, right) => (
       right.score - left.score
       || this.shieldExchange(state, right.state) - this.shieldExchange(state, left.state)
     ));
-    this.rootScores.set(key, new Map(
-      ranked.map(({ move, score }) => [moveKey(move), score]),
-    ));
-    const nonSacrificing = ranked.filter(
-      (candidate) => this.shieldExchange(state, candidate.state) >= 0,
-    );
-    const opponent = state.turn === "top" ? "bottom" : "top";
+    const mergedScores = new Map(previousScores || []);
+    for (const { move, score } of ranked) mergedScores.set(moveKey(move), score);
+    this.rootScores.set(key, mergedScores);
     const nonLosing = ranked.filter((candidate) => candidate.state.winner !== opponent);
     const immediateSurvivors = nonLosing.filter(
       (candidate) => !this.opponentCanWinNext(candidate.state),
     );
-    const safeRanked = immediateSurvivors.length
+    const candidates = immediateSurvivors.length
       ? immediateSurvivors
       : nonLosing.length ? nonLosing : ranked;
-    const safeNonSacrificing = nonSacrificing.filter(
-      (candidate) => !this.opponentCanWinNext(candidate.state),
-    );
-    const candidates = this.isTacticalPosition(state) || !safeNonSacrificing.length
-      ? safeRanked
-      : safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent).length
-        ? safeNonSacrificing.filter((candidate) => candidate.state.winner !== opponent)
-        : safeRanked;
     for (const candidate of candidates) {
       this.checkInterrupted();
-      if (this.opponentCanClaimDedicatedLaser(candidate.state)) continue;
       if (this.strictChild(state, candidate.move, candidate.state, false)
         || this.strictChild(state, candidate.move, candidate.state)) {
-        return { move: candidate.move, score: candidate.score };
-      }
-    }
-    for (const candidate of candidates) {
-      this.checkInterrupted();
-      if (this.strictChild(state, candidate.move, candidate.state, false)) {
-        return { move: candidate.move, score: candidate.score };
-      }
-    }
-    for (const candidate of candidates) {
-      this.checkInterrupted();
-      if (this.strictChild(state, candidate.move, candidate.state)) {
         return { move: candidate.move, score: candidate.score };
       }
     }
@@ -559,34 +663,43 @@ export class UltraSearch {
     const key = this.keyForState(state);
     if (this.rootSurvivalCache.has(key)) return this.rootSurvivalCache.get(key);
     if (state.winner || state.draw) {
-      const losing = state.winner !== state.turn;
-      this.rootSurvivalCache.set(key, losing);
-      return losing;
+      const canWin = state.winner === state.turn;
+      this.rootSurvivalCache.set(key, canWin);
+      return canWin;
     }
     const opponent = state.turn;
-    const canWin = this.game.legalChildren(state, false).some(({ move, state: child }) => {
+    const target = opponent === "top" ? "bottom" : "top";
+    const alreadyAimed = this.game.fireLasers(state.board).some(
+      (beam) => beam.hitKing === target,
+    );
+    const moves = alreadyAimed ? this.game.pseudoMoves(state) : this.forcingMoves(state);
+    let canWin = false;
+    for (const move of moves) {
       this.checkInterrupted();
-      if (child.winner !== opponent) return false;
-      return this.strictChild(state, move, child, false)
-        || this.strictChild(state, move, child);
-    });
+      let child;
+      try {
+        child = this.game.resolveMove(state, move, false, false).state;
+      } catch {
+        continue;
+      }
+      if (child.winner !== opponent) continue;
+      if (this.strictChild(state, move, child, false) || this.strictChild(state, move, child)) {
+        canWin = true;
+        break;
+      }
+    }
     this.rootSurvivalCache.set(key, canWin);
     return canWin;
   }
 
-  /** Detect whether the opponent can permanently dedicate one laser to this side's king. */
-  opponentCanClaimDedicatedLaser(state) {
-    const key = this.keyForState(state);
-    if (this.assignmentThreatCache.has(key)) return this.assignmentThreatCache.get(key);
-    const targetMask = state.turn === "top" ? 2 : 1;
-    const canClaim = this.game.legalChildren(state, false).some(({ move, state: child }) => {
-      this.checkInterrupted();
-      if (!this.game.reachableKingMasksByLaser(child.board).includes(targetMask)) return false;
-      return this.strictChild(state, move, child, false)
-        || this.strictChild(state, move, child);
-    });
-    this.assignmentThreatCache.set(key, canClaim);
-    return canClaim;
+  /** Treat an unfinished root-safety proof as unsafe without losing the legal fallback. */
+  rootMoveSurvivesBudget(state) {
+    try {
+      return !this.opponentCanWinNext(state);
+    } catch (error) {
+      if (error instanceof SearchInterrupted) return false;
+      throw error;
+    }
   }
 
   /** Evaluate a subtree with selective alpha-beta negamax. */
@@ -603,7 +716,7 @@ export class UltraSearch {
     const originalAlpha = alpha;
     const originalBeta = beta;
     const cacheKey = `${this.keyForState(state)}|${depth}`;
-    if (this.cache.has(cacheKey)) {
+    if (this.profile.useTranspositionTable !== false && this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
       if (cached.bound === "exact") return cached.value;
       if (cached.bound === "lower") alpha = Math.max(alpha, cached.value);
@@ -611,25 +724,41 @@ export class UltraSearch {
       if (alpha >= beta) return cached.value;
     }
 
-    let children = this.orderedChildren(state, ply);
-    if (!children.length) return 0;
+    const ordered = this.orderedChildren(state, ply, this.profile.lazyChildren === false);
+    if (!ordered.length) return 0;
     const branchLimit = this.profile.branchLimits[
       Math.min(Math.max(0, ply - 1), this.profile.branchLimits.length - 1)
     ];
-    const kingExposed = this.game.fireLasers(state.board).some((beam) => beam.hitKing);
-    children = this.strictSubset(state, children, branchLimit, kingExposed);
-    if (!children.length) return 0;
+    const lateMoveLimits = this.profile.lateMoveLimits;
+    const lateMoveLimit = lateMoveLimits
+      ? lateMoveLimits[Math.min(Math.max(0, ply - 1), lateMoveLimits.length - 1)]
+      : null;
+    const children = this.searchChildren(
+      state,
+      ordered,
+      branchLimit,
+      lateMoveLimit,
+      ply,
+    );
 
     let value = -Infinity;
     let bestMove = null;
-    for (const { move, state: child } of children) {
+    for (const { move, state: child, reduced } of children) {
+      const fullDepth = depth - 1;
+      const reduction = this.profile.lateMoveReductions !== false && reduced && fullDepth > 0
+        ? depth >= 4 ? 2 : 1
+        : 0;
+      const searchedDepth = Math.max(0, fullDepth - reduction);
       let score;
-      if (bestMove === null) {
-        score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+      if (bestMove === null || this.profile.principalVariationSearch === false) {
+        score = -this.negamax(child, fullDepth, -beta, -alpha, ply + 1);
       } else {
-        score = -this.negamax(child, depth - 1, -alpha - 1, -alpha, ply + 1);
+        score = -this.negamax(child, searchedDepth, -alpha - 1, -alpha, ply + 1);
+        if (reduction && score > alpha) {
+          score = -this.negamax(child, fullDepth, -alpha - 1, -alpha, ply + 1);
+        }
         if (score > alpha && score < beta) {
-          score = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+          score = -this.negamax(child, fullDepth, -beta, -alpha, ply + 1);
         }
       }
       if (score > value) {
@@ -649,24 +778,131 @@ export class UltraSearch {
         break;
       }
     }
+    if (bestMove === null) return 0;
     if (bestMove) this.ordering.set(this.keyForState(state), moveKey(bestMove));
     let bound = "exact";
     if (value <= originalAlpha) bound = "upper";
     else if (value >= originalBeta) bound = "lower";
-    this.cache.set(cacheKey, { value, bound });
+    if (this.profile.useTranspositionTable !== false) {
+      this.cache.set(cacheKey, { value, bound });
+    }
     return value;
   }
 
+  /** Lazily validate principal moves and reduced tails so cutoffs stop generation. */
+  *searchChildren(state, ordered, branchLimit, lateMoveLimit, ply = 1) {
+    if (this.profile.eagerValidation) {
+      const selected = this.validatedSearchChildren(state, ordered, branchLimit, lateMoveLimit);
+      for (const item of selected) yield item;
+      return;
+    }
+    const selectedKeys = new Set();
+    let principalMoves = 0;
+    for (const item of ordered) {
+      this.checkInterrupted();
+      const child = item.state || this.relaxedChild(state, item.move);
+      if (!child || !this.strictChild(state, item.move, child, false)) continue;
+      const key = moveKey(item.move);
+      selectedKeys.add(key);
+      principalMoves += 1;
+      yield { ...item, state: child, reduced: false };
+      if (principalMoves >= branchLimit) break;
+    }
+    // A bounded witness proves legality, but failure to find one is only unknown.
+    // Use exact validation to fill a sparse principal set without paying SAT cost
+    // for every candidate in ordinary positions.
+    if (principalMoves < branchLimit) {
+      for (const item of ordered) {
+        const key = moveKey(item.move);
+        if (selectedKeys.has(key)) continue;
+        this.checkInterrupted();
+        if (!this.reserveInternalExactCheck()) break;
+        const child = item.state || this.relaxedChild(state, item.move);
+        if (!child || !this.strictChild(state, item.move, child, true)) continue;
+        selectedKeys.add(key);
+        principalMoves += 1;
+        yield { ...item, state: child, reduced: false };
+        if (principalMoves >= branchLimit) break;
+      }
+    }
+    if (lateMoveLimit === null) return;
+    const forcingKeys = new Set([...this.forcingMoves(state)].map(moveKey));
+    let quietTail = 0;
+    for (const item of ordered) {
+      const key = moveKey(item.move);
+      if (selectedKeys.has(key)) continue;
+      const forcing = forcingKeys.has(key);
+      if (!forcing && quietTail >= lateMoveLimit) continue;
+      this.checkInterrupted();
+      const child = item.state || this.relaxedChild(state, item.move);
+      if (!child) continue;
+      const legal = this.strictChild(state, item.move, child, false)
+        || (forcing && this.profile.exactForcingTails !== false
+          && this.reserveInternalExactCheck()
+          && this.strictChild(state, item.move, child, true));
+      if (!legal) continue;
+      yield { ...item, state: child, reduced: !forcing };
+      selectedKeys.add(key);
+      if (!forcing) quietTail += 1;
+    }
+  }
+
+  /** Reserve one bounded exact route certification for an internal search branch. */
+  reserveInternalExactCheck() {
+    if (this.internalExactChecks >= (this.profile.maxInternalExactChecks ?? 24)) return false;
+    this.internalExactChecks += 1;
+    return true;
+  }
+
+  /** Materialize a complete legal branch list for search ablations and diagnostics. */
+  validatedSearchChildren(state, ordered, branchLimit, lateMoveLimit) {
+    const selected = [];
+    const selectedKeys = new Set();
+    for (const item of ordered) {
+      this.checkInterrupted();
+      const child = item.state || this.relaxedChild(state, item.move);
+      if (!child || !this.strictChild(state, item.move, child, true)) continue;
+      selected.push({ ...item, state: child, reduced: false });
+      selectedKeys.add(moveKey(item.move));
+      if (selected.length >= branchLimit) break;
+    }
+    if (lateMoveLimit === null) return selected;
+    const forcingKeys = new Set([...this.forcingMoves(state)].map(moveKey));
+    let quietTail = 0;
+    for (const item of ordered) {
+      const key = moveKey(item.move);
+      if (selectedKeys.has(key)) continue;
+      const forcing = forcingKeys.has(key);
+      if (!forcing && quietTail >= lateMoveLimit) continue;
+      this.checkInterrupted();
+      const child = item.state || this.relaxedChild(state, item.move);
+      if (!child || !this.strictChild(state, item.move, child, true)) continue;
+      selected.push({ ...item, state: child, reduced: !forcing });
+      selectedKeys.add(key);
+      if (!forcing) quietTail += 1;
+    }
+    return selected;
+  }
+
   /** Return legal children sorted by tactical search priority. */
-  orderedChildren(state, ply = 0) {
+  orderedChildren(state, ply = 0, resolveChildren = true) {
     const key = this.keyForState(state);
+    const preferred = this.ordering.get(key);
+    const killers = this.killers.get(ply) || [];
+    if (!resolveChildren) {
+      return [...this.game.pseudoMoves(state)]
+        .map((move) => ({
+          move,
+          priority: this.lazyMovePriority(state, move, preferred, killers),
+        }))
+        .sort((left, right) => right.priority - left.priority)
+        .map(({ move }) => ({ move, state: null }));
+    }
     let children = this.childrenCache.get(key);
     if (!children) {
       children = this.game.legalChildren(state, false);
       this.childrenCache.set(key, children);
     }
-    const preferred = this.ordering.get(key);
-    const killers = this.killers.get(ply) || [];
     return children
       .map((child) => ({
         child,
@@ -674,6 +910,68 @@ export class UltraSearch {
       }))
       .sort((left, right) => right.priority - left.priority)
       .map(({ child }) => child);
+  }
+
+  /** Rank unresolved internal moves from history and live-volley geometry. */
+  lazyMovePriority(state, move, preferred, killers) {
+    const key = moveKey(move);
+    const killerIndex = killers.indexOf(key);
+    let adjacentMirrors = 0;
+    for (let row = Math.max(0, move.row - 1); row < Math.min(BOARD_SIZE, move.row + 2); row += 1) {
+      for (let col = Math.max(0, move.col - 1); col < Math.min(BOARD_SIZE, move.col + 2); col += 1) {
+        if ([Cell.SLASH, Cell.BACKSLASH].includes(state.board[row][col])) adjacentMirrors += 1;
+      }
+    }
+    return (key === preferred ? 100_000 : 0)
+      + (killerIndex >= 0 ? 50_000 - killerIndex * 5_000 : 0)
+      + this.previewOrderingScore(state, move)
+      + (this.history.get(key) || 0)
+      + adjacentMirrors * 20;
+  }
+
+  /** Approximate the old child ordering score without route validation or SAT. */
+  previewOrderingScore(state, move) {
+    const beams = previewVolley(state.board, move);
+    const hitKings = new Set(beams.map((beam) => beam.hitKing).filter(Boolean));
+    const destroyed = [];
+    for (const beam of beams) {
+      if (!beam.hitShield) continue;
+      const [row, col] = beam.hitShield;
+      if (!destroyed.some(([seenRow, seenCol]) => seenRow === row && seenCol === col)) {
+        destroyed.push([row, col]);
+      }
+    }
+    const opponent = state.turn === "top" ? "bottom" : "top";
+    if (hitKings.has(state.turn) && hitKings.has(opponent)) return 0;
+    if (hitKings.has(opponent)) return 1_000_000;
+    if (hitKings.has(state.turn)) return -1_000_000;
+
+    const shields = this.shieldCounts(state.board);
+    let ownLost = 0;
+    let opponentLost = 0;
+    for (const [row] of destroyed) {
+      const owner = row <= 2 ? "top" : "bottom";
+      if (owner === state.turn) ownLost += 1;
+      else opponentLost += 1;
+    }
+    const nextHitKings = new Set(
+      previewVolley(state.board, move, destroyed).map((beam) => beam.hitKing).filter(Boolean),
+    );
+    const childBase = (
+      (shields[opponent] - opponentLost) - (shields[state.turn] - ownLost)
+    ) * EVALUATION_WEIGHTS.shieldCount
+      + (nextHitKings.has(state.turn) ? 300 : 0)
+      - (nextHitKings.has(opponent) ? 300 : 0);
+    return -(childBase + (opponentLost - ownLost) * 24) * 1000;
+  }
+
+  /** Resolve placement, firing, and individual reachability before exact joint validation. */
+  relaxedChild(state, move) {
+    try {
+      return this.game.resolveMove(state, move, false, false).state;
+    } catch {
+      return null;
+    }
   }
 
   /** Select the highest-ranked fully legal children up to one branch limit. */
@@ -699,7 +997,7 @@ export class UltraSearch {
     if (fastChild) {
       const legal = allowExact
         ? this.game.jointPathPreserved(state.board, fastChild.board, move)
-        : this.game.jointPathPreservedFast(state.board, fastChild.board, move);
+        : Boolean(this.game.fastJointPathWitness(fastChild.board));
       legality.set(keyForMove, legal);
       return legal ? fastChild : null;
     }
@@ -710,7 +1008,7 @@ export class UltraSearch {
         return child;
       }
       const child = this.game.resolveMove(state, move, false, false).state;
-      const legal = this.game.jointPathPreservedFast(state.board, child.board, move);
+      const legal = Boolean(this.game.fastJointPathWitness(child.board));
       legality.set(keyForMove, legal);
       return legal ? child : null;
     } catch {
@@ -876,7 +1174,7 @@ export class UltraSearch {
     }
   }
 
-  /** Score shield material, live beam pressure, and route resilience. */
+  /** Score a position with held-out fitted route, shield, and live-contact features. */
   strategicEvaluation(state) {
     const key = this.keyForState(state);
     if (this.evaluationCache.has(key)) return this.evaluationCache.get(key);
@@ -899,39 +1197,50 @@ export class UltraSearch {
     if (state.winner || state.draw) {
       return {
         terminal,
-        shieldCount: 0,
-        assignmentControl: 0,
-        routeControl: 0,
-        exposure: 0,
+        tempo: 0,
+        shieldMaterial: 0,
+        routeProximity: 0,
+        oneMoveRoutes: 0,
+        shieldContact: 0,
       };
     }
     const shieldCounts = this.shieldCounts(state.board);
-    const shieldCount = (
-      shieldCounts[own] - shieldCounts[opponent]
-    ) * EVALUATION_WEIGHTS.shieldCount;
-
-    const attackMask = opponent === "top" ? 1 : 2;
-    const exposedMask = own === "top" ? 1 : 2;
-    const assignmentControl = (
-      this.assignmentControl(state) * EVALUATION_WEIGHTS.assignment
-    );
-
+    const shieldMaterial = shieldCounts[own] * EVALUATION_WEIGHTS.ownShield
+      + shieldCounts[opponent] * EVALUATION_WEIGHTS.opponentShield;
     const routeCosts = this.game.routeCostsByLaser(state.board);
-    const routeControl = routePressureScore(routeCosts, own, opponent);
-
-    let hitMask = 0;
+    const attackCosts = routeCosts.map(
+      (costs) => boundedRouteCost(costs, opponent),
+    ).sort((left, right) => left - right);
+    const dangerCosts = routeCosts.map(
+      (costs) => boundedRouteCost(costs, own),
+    ).sort((left, right) => left - right);
+    const routeProximity = (
+      EVALUATION_WEIGHTS.routeLimit - attackCosts[0]
+    ) * EVALUATION_WEIGHTS.attackNearestProximity
+      + (EVALUATION_WEIGHTS.routeLimit - dangerCosts[0])
+        * EVALUATION_WEIGHTS.dangerNearestProximity
+      + (EVALUATION_WEIGHTS.routeLimit - attackCosts[1])
+        * EVALUATION_WEIGHTS.attackReserveProximity
+      + (EVALUATION_WEIGHTS.routeLimit - dangerCosts[1])
+        * EVALUATION_WEIGHTS.dangerReserveProximity;
+    const oneMoveRoutes = attackCosts.filter((cost) => cost <= 1).length
+        * EVALUATION_WEIGHTS.attackOneMoveRoute
+      + dangerCosts.filter((cost) => cost <= 1).length
+        * EVALUATION_WEIGHTS.dangerOneMoveRoute;
+    let dangerContacts = 0;
     for (const beam of this.game.fireLasers(state.board)) {
-      if (beam.hitKing === "top") hitMask |= 1;
-      else if (beam.hitKing === "bottom") hitMask |= 2;
+      if (beam.hitShield && this.shieldOwnerAt(...beam.hitShield) === own) dangerContacts += 1;
     }
-    const exposure = (hitMask & attackMask ? EVALUATION_WEIGHTS.exposure : 0)
-      - (hitMask & exposedMask ? EVALUATION_WEIGHTS.exposure : 0);
+    const shieldContact = dangerContacts
+      ? dangerContacts * EVALUATION_WEIGHTS.dangerShieldContact
+      : 0;
     return {
       terminal,
-      shieldCount,
-      assignmentControl,
-      routeControl,
-      exposure,
+      tempo: EVALUATION_WEIGHTS.tempo,
+      shieldMaterial,
+      routeProximity,
+      oneMoveRoutes,
+      shieldContact,
     };
   }
 
@@ -976,6 +1285,14 @@ export class UltraSearch {
     return counts;
   }
 
+  /** Identify the fixed king enclosure that owns one surviving shield square. */
+  shieldOwnerAt(row, col) {
+    const topDistance = Math.max(row, Math.abs(col - 4));
+    if (topDistance <= 2) return "top";
+    const bottomDistance = Math.max(BOARD_SIZE - 1 - row, Math.abs(col - 4));
+    return bottomDistance <= 2 ? "bottom" : null;
+  }
+
   /** Return a stable serialized key for an immutable search state. */
   keyForState(state) {
     let key = this.stateKeys.get(state);
@@ -988,6 +1305,7 @@ export class UltraSearch {
 
   /** Abort once the configured search deadline is reached. */
   checkInterrupted() {
+    if (this.nodes >= (this.profile.nodeLimit ?? Infinity)) throw new SearchInterrupted();
     const now = this.now();
     if (now >= this.deadline) throw new SearchInterrupted();
     if (now - this.lastProgressAt >= 250) this.reportProgress("searching", false, now);

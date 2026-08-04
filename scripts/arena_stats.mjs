@@ -22,6 +22,60 @@ export function pentanomialCounts(pairScores) {
   return counts;
 }
 
+/** Convert conventional logistic Elo into an expected per-game score. */
+export function scoreRateFromElo(elo) {
+  return 1 / (1 + (10 ** (-elo / 400)));
+}
+
+/** Exponentially tilt an empirical pentanomial distribution to a target score. */
+function tiltedDistribution(counts, targetScore) {
+  const outcomes = [0, 0.25, 0.5, 0.75, 1];
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const base = counts.map((count) => (count + 0.5) / (total + 2.5));
+  let low = -40;
+  let high = 40;
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const lambda = (low + high) / 2;
+    const weighted = base.map((probability, index) => (
+      probability * Math.exp(lambda * outcomes[index])
+    ));
+    const normalizer = weighted.reduce((sum, value) => sum + value, 0);
+    const mean = weighted.reduce(
+      (sum, value, index) => sum + value * outcomes[index],
+      0,
+    ) / normalizer;
+    if (mean < targetScore) low = lambda;
+    else high = lambda;
+  }
+  const lambda = (low + high) / 2;
+  const weighted = base.map((probability, index) => (
+    probability * Math.exp(lambda * outcomes[index])
+  ));
+  const normalizer = weighted.reduce((sum, value) => sum + value, 0);
+  return weighted.map((value) => value / normalizer);
+}
+
+/** Evaluate a pentanomial SPRT between two predeclared Elo hypotheses. */
+export function pentanomialSprt(pairScores, {
+  elo0,
+  elo1,
+  alpha = 0.05,
+  beta = 0.05,
+} = {}) {
+  if (!(elo1 > elo0)) throw new Error("SPRT requires elo1 > elo0.");
+  const counts = pentanomialCounts(pairScores);
+  const hypothesis0 = tiltedDistribution(counts, scoreRateFromElo(elo0));
+  const hypothesis1 = tiltedDistribution(counts, scoreRateFromElo(elo1));
+  const llr = counts.reduce(
+    (sum, count, index) => sum + count * Math.log(hypothesis1[index] / hypothesis0[index]),
+    0,
+  );
+  const lower = Math.log(beta / (1 - alpha));
+  const upper = Math.log((1 - beta) / alpha);
+  const status = llr >= upper ? "accept-h1" : llr <= lower ? "accept-h0" : "inconclusive";
+  return { elo0, elo1, alpha, beta, llr, lower, upper, status };
+}
+
 /** Produce a deterministic percentile bootstrap interval over opening pairs. */
 export function pairedBootstrapInterval(pairScores, {
   samples = 10000,
@@ -63,6 +117,8 @@ export function summarizePairs(pairScores, bootstrapOptions) {
     lowElo: eloFromScore(low),
     highElo: eloFromScore(high),
     pentanomial: pentanomialCounts(pairScores),
+    nonregressionSprt: pentanomialSprt(pairScores, { elo0: -20, elo1: 0 }),
+    improvementSprt: pentanomialSprt(pairScores, { elo0: 0, elo1: 20 }),
   };
 }
 
@@ -70,7 +126,9 @@ export function summarizePairs(pairScores, bootstrapOptions) {
 export function passesArenaGate(summary, gate) {
   if (gate === "off") return true;
   if (gate === "nonregression") {
-    return summary.scoreRate >= 0.45 && summary.high >= 0.5;
+    // Fixed-size CI batches are not sequential tests. Require a neutral point
+    // estimate and reject confidence intervals compatible with a severe loss.
+    return summary.scoreRate >= 0.49 && summary.low >= 0.45;
   }
   if (gate === "improvement") return summary.low > 0.5;
   throw new Error(`Unknown arena gate: ${gate}`);

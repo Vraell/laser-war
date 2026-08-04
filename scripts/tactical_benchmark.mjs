@@ -12,9 +12,10 @@ const fixtureFiles = readdirSync(fixtureDirectory)
   .sort();
 const PROFILE = {
   timeLimit: Infinity,
-  maxDepth: 2,
+  maxDepth: 3,
   rootLimit: 24,
   branchLimits: [24, 16, 10],
+  lateMoveLimits: [14, 10, 8],
   includeForcingRoots: true,
 };
 
@@ -88,8 +89,27 @@ const cases = [
     name: "retain live-beam counterplay beyond the quiet root limit",
     fixture: "ultra_loss_reversed_28_move_log.json",
     plies: 16,
-    verify(_game, _state, result) {
-      assert.deepEqual(result.move, { row: 5, col: 1, mirror: "/" });
+    verify(game, state, result) {
+      const liveKeys = new Set([...new UltraSearch(game, () => 0, PROFILE).forcingMoves(state)]
+        .map((move) => `${move.row},${move.col},${move.mirror}`));
+      assert.ok(liveKeys.has(`${result.move.row},${result.move.col},${result.move.mirror}`));
+      assert.equal(concedesMateInOne(game, game.resolveMove(state, result.move).state), false);
+    },
+  },
+  {
+    name: "search outside the root shortlist for an immediate defense",
+    fixture: "ultra_loss_13_move_log.json",
+    plies: 11,
+    verify(game, state, result) {
+      const children = game.legalChildren(state);
+      const selected = children.find(({ move }) => (
+        move.row === result.move.row
+        && move.col === result.move.col
+        && move.mirror === result.move.mirror
+      ));
+      assert.ok(selected);
+      assert.equal(concedesMateInOne(game, selected.state), false);
+      assert.ok(children.some(({ state: child }) => concedesMateInOne(game, child)));
     },
   },
 ];

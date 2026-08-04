@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 2
 
       - name: Run tests
-        run: node --test web/*.test.mjs scripts/arena_stats.test.mjs
+        run: node --test web/*.test.mjs scripts/arena_stats.test.mjs scripts/arena_integrity.test.mjs
 
       - name: Run tactical corpus
         run: node scripts/tactical_benchmark.mjs
@@ -34,15 +34,47 @@ jobs:
       - name: Compare search speed
         run: node scripts/search_benchmark.mjs HEAD^ --gate=nonregression
 
-      - name: Compare AI strength
+      - name: Compare standard AI strength
+        run: >-
+          node scripts/elo_benchmark.mjs
+          --pairs 64
+          --difficulties easy,medium,hard
+          --opening-plies 0,2,4,6,8,10
+          --max-plies 96
+          --resource nodes
+          --ultra-nodes 20000
+          --openings mixed
+          --gate nonregression
+          --candidate-ref HEAD
+          --baseline-ref HEAD^
+
+      - name: Compare Ultra strength
         run: >-
           node scripts/elo_benchmark.mjs
           --pairs 32
-          --difficulties easy,medium,hard,ultra
+          --difficulties ultra
           --opening-plies 0,2,4,6,8,10
-          --max-plies 72
-          --ultra-time 120
+          --max-plies 96
+          --resource nodes
+          --ultra-nodes 20000
+          --openings mixed
           --gate nonregression
+          --candidate-ref HEAD
+          --baseline-ref HEAD^
+
+      - name: Confirm Ultra on independent positions
+        run: >-
+          node scripts/elo_benchmark.mjs
+          --pairs 16
+          --difficulties ultra
+          --opening-plies 2,4,6,8,10
+          --max-plies 96
+          --resource nodes
+          --ultra-nodes 20000
+          --openings confirmation
+          --seed-offset 10000
+          --gate nonregression
+          --candidate-ref HEAD
           --baseline-ref HEAD^
 
       - name: Build browser game

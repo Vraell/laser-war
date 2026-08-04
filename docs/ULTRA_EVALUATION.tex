@@ -14,8 +14,6 @@
 \definecolor{ink}{HTML}{17212B}
 \definecolor{muted}{HTML}{5D6B78}
 \definecolor{cyan}{HTML}{168FB4}
-\definecolor{red}{HTML}{C94157}
-\definecolor{gold}{HTML}{D58B16}
 \definecolor{panel}{HTML}{F1F5F7}
 
 \hypersetup{
@@ -26,17 +24,19 @@
   pdfauthor={Laser War Project}
 }
 
-\newcommand{\GameVersion}{v0.13.6}
+\newcommand{\GameVersion}{v0.14.0}
 \newcommand{\MateScore}{10000}
-\newcommand{\ShieldCountWeight}{25}
-\newcommand{\AssignmentWeight}{1218}
-\newcommand{\ExposureWeight}{540}
+\newcommand{\TempoBias}{-1700.6308845157791}
+\newcommand{\OwnShieldWeight}{90.43228663345721}
+\newcommand{\OpponentShieldWeight}{-45.328692796001064}
+\newcommand{\AttackNearestWeight}{174.36719062170332}
+\newcommand{\DangerNearestWeight}{-5.4963762962904115}
+\newcommand{\AttackReserveWeight}{22.103736462008076}
+\newcommand{\DangerReserveWeight}{-36.79374075489845}
+\newcommand{\AttackOneMoveWeight}{396.52436486142835}
+\newcommand{\DangerOneMoveWeight}{-164.9882875478994}
+\newcommand{\DangerContactWeight}{-123.57179042246001}
 \newcommand{\RouteLimit}{12}
-\newcommand{\RouteRaceLinear}{67}
-\newcommand{\RouteReserveLinear}{42}
-\newcommand{\RouteRaceQuadratic}{28}
-\newcommand{\RouteReserveQuadratic}{18}
-\newcommand{\RoutePerLaserQuadratic}{8}
 
 \pagestyle{fancy}
 \setlength{\headheight}{14pt}
@@ -47,254 +47,159 @@
 \renewcommand{\headrulewidth}{0.4pt}
 
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.55em}
-\setlist[itemize]{leftmargin=1.3em,itemsep=0.3em,topsep=0.2em}
+\setlength{\parskip}{0.5em}
+\setlist[itemize]{leftmargin=1.3em,itemsep=0.25em,topsep=0.2em}
 
 \begin{document}
 
 \begin{center}
   {\color{cyan}\rule{0.88\textwidth}{2.2pt}}\\[1.1em]
   {\Huge\bfseries\color{ink} Ultra Evaluation Function}\\[0.5em]
-  {\Large\color{muted} How Laser War measures a position}\\[0.8em]
-  {\small\color{muted}Game version \GameVersion\ \textbullet\ 30 July 2026}
+  {\Large\color{muted}How Laser War measures a position}\\[0.8em]
+  {\small\color{muted}Game version \GameVersion\ \textbullet\ 3 August 2026}
   \\[1.1em]
   {\color{cyan}\rule{0.88\textwidth}{0.6pt}}
 \end{center}
 
-\vspace{0.6em}
+\vspace{0.5em}
 
 \colorbox{panel}{%
   \parbox{\dimexpr\textwidth-2\fboxsep\relax}{%
-    \textbf{The central idea.}
+    \textbf{Central idea.}
     A positive score favors the player whose turn it is. A negative score favors
-    the opponent. The score combines king safety, future laser access, permanent
-    laser assignments, route speed, and the lasers' current impact.
+    the opponent. Ultra values concrete route proximity and one-move pressure,
+    then adjusts for surviving shields and a laser already contacting friendly cover.
   }%
 }
 
-\section*{1. The complete score}
+\section*{1. Terminal positions}
 
-For a non-terminal position, Ultra evaluates
+The game result overrides every positional estimate:
 \[
 E =
-S_{\mathrm{count}}
-+ S_{\mathrm{assign}}
-+ S_{\mathrm{route}}
-+ S_{\mathrm{exposure}}.
+\begin{cases}
++\MateScore, & \text{the side to move is recorded as the winner},\\
+-\MateScore, & \text{the opponent is recorded as the winner},\\
+0, & \text{the position is a draw}.
+\end{cases}
+\]
+During search, shorter wins and longer losses receive small ply adjustments, so
+Ultra prefers the quickest proven win and delays a proven loss.
+
+\section*{2. Route measurements}
+
+For each of the two lasers, the rules engine computes the fewest additional
+mirrors needed to reach each king. Destroying a shield costs one step and placing
+a turning mirror costs one step. Missing or very long routes are capped at
+\(\RouteLimit\).
+
+Let \(a_1\leq a_2\) be the sorted costs to the opposing king and let
+\(d_1\leq d_2\) be the sorted costs to the current player's king. Define the
+bounded proximity
+\[
+p(c)=\RouteLimit-c.
+\]
+The first cost describes the quickest available laser; the second describes the
+reserve laser. Keeping both prevents one attractive route from hiding complete
+weakness on the other side of the board.
+
+Also define
+\[
+A_1=\#\{a_i\leq 1\},
+\qquad
+D_1=\#\{d_i\leq 1\}.
+\]
+These counts identify positions in which one or both lasers need at most one new
+mirror to reach a king. Held-out game data found these one-move counts more useful
+than a large generic bonus for visually open routes.
+
+\section*{3. Shields and live contact}
+
+Let \(N_o\) and \(N_e\) be the surviving shields around the current player's
+king and the opposing king. Shields never move or regenerate, so no separate
+shape term is used.
+
+Let \(C_d\) be the number of current lasers whose next collision is a shield
+belonging to the current player. Such contact is dangerous because the shield is
+already scheduled to disappear on the next volley. Contact with an opposing
+shield was tested, but its fitted coefficient was zero after route pressure was
+included, so it contributes nothing here.
+
+\section*{4. Complete non-terminal score}
+
+For every non-terminal position,
+\[
+\begin{aligned}
+E={}&B+w_oN_o+w_eN_e\\
+&+w_{a1}p(a_1)+w_{d1}p(d_1)\\
+&+w_{a2}p(a_2)+w_{d2}p(d_2)\\
+&+w_AA_1+w_DD_1+w_CC_d.
+\end{aligned}
 \]
 
-Every term is measured from the side to move. When the turn changes, the point
-of view changes with it. This makes the score symmetric between Red and Blue.
+The signed constants below are rounded for readability; the source records their
+full precision. A negative danger coefficient means that an easier route to the
+current player's king lowers the score. The constant \(B\) calibrates the raw sum to observed outcomes;
+it does not represent material on the board.
 
 \begin{center}
+\small
 \rowcolors{2}{panel}{white}
-\begin{tabularx}{\textwidth}{p{0.22\textwidth}X>{\raggedleft\arraybackslash}p{0.19\textwidth}}
+\begin{tabularx}{\textwidth}{p{0.28\textwidth}X>{\raggedleft\arraybackslash}p{0.13\textwidth}}
 \toprule
-\textbf{Term} & \textbf{Question being asked} & \textbf{Typical scale}\\
+\textbf{Signal} & \textbf{Meaning} & \textbf{Weight}\\
 \midrule
-Shield material & Who has more surviving cover around their king? & tens\\
-Assignment control & Has a laser become permanently committed to one king? & thousands\\
-Route control & Who can complete the important laser routes sooner? & hundreds to thousands\\
-Exposure & Is a king on a live laser path right now? & hundreds\\
+Calibration baseline \(B\) & Centers the fitted score & -1700.63\\
+Own surviving shield \(w_o\) & Remaining friendly cover & +90.43\\
+Opponent surviving shield \(w_e\) & Remaining enemy cover & -45.33\\
+Nearest attack \(w_{a1}\) & Quickest route to the enemy king & +174.37\\
+Nearest danger \(w_{d1}\) & Quickest route to the friendly king & -5.50\\
+Reserve attack \(w_{a2}\) & Second route to the enemy king & +22.10\\
+Reserve danger \(w_{d2}\) & Second route to the friendly king & -36.79\\
+Attack within one move \(w_A\) & Immediately buildable attack route & +396.52\\
+Danger within one move \(w_D\) & Immediately buildable enemy route & -164.99\\
+Friendly shield under laser \(w_C\) & Cover already contacted by a beam & -123.57\\
 \bottomrule
 \end{tabularx}
 \end{center}
 
-If the game is already over, these positional terms are ignored:
-\[
-E =
-\begin{cases}
-+\MateScore, & \text{the side to move is the winner},\\
--\MateScore, & \text{the opponent is the winner},\\
-0, & \text{the result is a draw}.
-\end{cases}
-\]
+\section*{5. Why earlier terms were removed}
 
-\section*{2. King cover}
+The previous evaluator separately rewarded permanent one-king assignment,
+current king exposure, nonlinear route gaps, and raw shield cascades. Those ideas
+are tactically meaningful, but grouped ablations found that they did not improve
+held-out prediction after granular route distance and one-move pressure were known.
+They are therefore not assigned unsupported static weights.
 
-Each king begins with six shields in fixed positions: five adjacent shields
-and one outer shield. Shields can be destroyed but never moved or created.
-Consequently, the evaluation treats every surviving shield equally rather
-than pretending that the formation can change shape.
+This does not make Ultra tactically blind. Search still treats an actual win as
+\(\pm\MateScore\), checks every legal mate in one, extends loaded king exposures,
+and can certify short forcing lines. Those are discrete tactical facts, not soft
+positional bonuses.
 
-Let \(N_{\mathrm{own}}\) and \(N_{\mathrm{opp}}\) be the surviving shield counts
-around the two kings. Then
-\[
-S_{\mathrm{count}}
-= \ShieldCountWeight\left(N_{\mathrm{own}}-N_{\mathrm{opp}}\right).
-\]
+\section*{6. Evidence and interpretation}
 
-Each extra nearby shield is therefore worth \(\ShieldCountWeight\) points.
+The fitted model was trained with monotonic signs: attack features could not become
+negative and danger features could not become positive. Games, not individual
+positions, defined the train/hold-out split.
 
-\section*{3. Permanent laser assignment}
-
-This decisive strategic feature was introduced in v0.13.4.
-
-The rules require the two lasers to retain compatible future routes to
-different kings. Suppose one laser can now reach only the Blue king. Because
-the two target kings must differ, that laser is permanently assigned to Blue
-and the other laser must serve the route to Red. Later mirror placements can
-remove options, but they cannot restore a route already made impossible.
-
-For each laser:
-\[
-a_\ell =
-\begin{cases}
-+1, & \text{it can reach only the opposing king},\\
--1, & \text{it can reach only the current player's king},\\
-0, & \text{it can still reach both kings}.
-\end{cases}
-\]
-The assignment score is
-\[
-S_{\mathrm{assign}}
-= \AssignmentWeight\sum_{\ell=1}^{2}a_\ell.
-\]
-
-The large weight is intentional. A dedicated attack laser is not a small
-positional preference: it permanently defines which side can build with that
-laser and which king must absorb its pressure.
-
-There is no separate reachability-count term. Because the rules require every
-laser to reach at least one king, the difference between the number of lasers
-that can reach each king is exactly \(\sum a_\ell\). Counting both would measure
-the same fact twice.
-
-\section*{4. Route control}
-
-Reachability answers \emph{whether} a route exists. Route control estimates
-\emph{how many new mirrors} are needed to complete it.
-
-For each laser \(\ell\), let
-\[
-c_\ell(P)
-= \min\!\left(\text{fewest new mirrors needed to reach king }P,\ \RouteLimit\right).
-\]
-An unreachable target is also assigned the capped value \(\RouteLimit\).
-
-For the opposing king, sort the two costs:
-\[
-\alpha_1\leq\alpha_2.
-\]
-For the current player's king, sort them separately:
-\[
-\delta_1\leq\delta_2.
-\]
-
-The two race gaps are
-\[
-r=\delta_1-\alpha_1,
-\qquad
-q=\delta_2-\alpha_2.
-\]
-A positive \(r\) means the quickest attack on the opponent is closer than the
-quickest danger to the current player's king. The reserve gap \(q\) compares
-the second laser and therefore rewards control that is not dependent on a
-single route.
-
-Define the signed square
-\[
-\sigma(x)=x|x|.
-\]
-It preserves the sign of a lead while making large leads matter more than
-small ones. For each laser, also define its individual control gap
-\[
-g_\ell=c_\ell(\mathrm{own})-c_\ell(\mathrm{opponent}).
-\]
-
-The complete route term is
-\[
-\begin{aligned}
-S_{\mathrm{route}}={}&
-\RouteRaceLinear r
-+\RouteReserveLinear q\\
-&+\RouteRaceQuadratic\sigma(r)
-+\RouteReserveQuadratic\sigma(q)
-+\RoutePerLaserQuadratic\sum_{\ell=1}^{2}\sigma(g_\ell).
-\end{aligned}
-\]
-
-\textbf{Why all three comparisons?}
-The quickest route measures the immediate race, the second route measures
-resilience, and the per-laser gaps preserve information about which physical
-laser controls each side of the board.
-
-\section*{5. Current laser exposure}
-
-The board's present laser paths are evaluated after all existing mirrors:
-\[
-S_{\mathrm{exposure}}
-=
-\begin{cases}
-+\ExposureWeight, & \text{only the opposing king is currently hit},\\
--\ExposureWeight, & \text{only the current player's king is currently hit},\\
-0, & \text{neither king or both kings are hit}.
-\end{cases}
-\]
-
-Both kings being hit is neutral in this term because the lasers fire
-simultaneously. The actual game result, when a move is resolved, still takes
-priority over every positional score.
-
-\section*{6. Reading a score}
+Compared with the previous formula, the selected features improved hold-out log
+loss by \(0.0683\), with a game-bootstrap 95\% interval from \(0.0199\) to
+\(0.1143\). On a separate seed set, log loss improved by \(0.1007\) and outcome
+accuracy rose from 66.9\% to 72.0\%. These measurements justify an arena candidate;
+paired games remain the final test of playing strength.
 
 \begin{itemize}
-  \item A score near zero means the measurable advantages are balanced; it
-  does not guarantee a draw.
-  \item A few hundred points usually indicate route or exposure pressure.
-  \item A swing of roughly \(\AssignmentWeight\) points usually signals that a
-  laser has become permanently dedicated to one king.
-  \item Scores near \(\pm\MateScore\) represent a forced or completed win and
-  dominate every positional consideration.
+  \item Scores are comparative search values, not win probabilities.
+  \item A score near zero means the measured factors are balanced, not that a draw
+  is forced.
+  \item Values near \(\pm\MateScore\) are reserved for completed or certified wins.
+  \item One-move route pressure is deliberately stronger than raw shield material.
 \end{itemize}
-
-\colorbox{panel}{%
-  \parbox{\dimexpr\textwidth-2\fboxsep\relax}{%
-    \textbf{Example: the permanent-lane failure.}
-    If both lasers initially reach both kings, the assignment term is zero.
-    If a move makes the left laser able to reach only Blue, then from Red's
-    point of view the assignment term becomes \(+\AssignmentWeight\); from
-    Blue's point of view it becomes \(-\AssignmentWeight\). This captures the
-    irreversible strategic change even before the final mirror route is built.
-  }%
-}
-
-\section*{7. Worked example}
-
-Consider a position evaluated for Red:
-
-\begin{itemize}
-  \item Both sides have four nearby shields, so
-  \(S_{\mathrm{count}}=25(4-4)=0\).
-  \item One laser can reach only Blue and the other still reaches both kings,
-  so \(S_{\mathrm{assign}}=1218(1+0)=1218\).
-  \item The sorted attack costs are \((2,5)\), the sorted danger costs are
-  \((4,7)\), and each physical laser has a control gap of \(2\).
-  Consequently,
-  \[
-  \begin{aligned}
-  S_{\mathrm{route}}
-  &=67(2)+42(2)+28\sigma(2)+18\sigma(2)
-    +8\bigl(\sigma(2)+\sigma(2)\bigr)\\
-  &=466.
-  \end{aligned}
-  \]
-  \item Neither king is currently exposed, so
-  \(S_{\mathrm{exposure}}=0\).
-\end{itemize}
-
-The complete evaluation is therefore
-\[
-E=0+1218+466+0=\boxed{1684}.
-\]
-This is a large Red advantage. Most of it comes from the permanent assignment,
-while the route race confirms that Red is also closer to converting that
-structural advantage.
 
 \vfill
 \begin{center}
 \small\color{muted}
-This document describes the evaluation used by Laser War \GameVersion.
+This document describes the pure evaluation logic used by Laser War \GameVersion.
 \end{center}
 
 \end{document}

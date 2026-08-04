@@ -18,15 +18,17 @@ assert.equal(
 
 const documentedWeights = {
   mate: "MateScore",
-  shieldCount: "ShieldCountWeight",
-  assignment: "AssignmentWeight",
-  exposure: "ExposureWeight",
+  tempo: "TempoBias",
+  ownShield: "OwnShieldWeight",
+  opponentShield: "OpponentShieldWeight",
+  attackNearestProximity: "AttackNearestWeight",
+  dangerNearestProximity: "DangerNearestWeight",
+  attackReserveProximity: "AttackReserveWeight",
+  dangerReserveProximity: "DangerReserveWeight",
+  attackOneMoveRoute: "AttackOneMoveWeight",
+  dangerOneMoveRoute: "DangerOneMoveWeight",
+  dangerShieldContact: "DangerContactWeight",
   routeLimit: "RouteLimit",
-  routeRaceLinear: "RouteRaceLinear",
-  routeReserveLinear: "RouteReserveLinear",
-  routeRaceQuadratic: "RouteRaceQuadratic",
-  routeReserveQuadratic: "RouteReserveQuadratic",
-  routePerLaserQuadratic: "RoutePerLaserQuadratic",
 };
 
 for (const [weight, macro] of Object.entries(documentedWeights)) {

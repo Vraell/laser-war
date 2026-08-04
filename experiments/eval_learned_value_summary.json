@@ -1,0 +1,566 @@
+{
+  "format": 1,
+  "experiment": "eval_learned_value_v1",
+  "metadata": {
+    "generated": {
+      "train": {
+        "partition": "train",
+        "games": 72,
+        "seed": 430108691,
+        "maxPlies": 72,
+        "sampleEvery": 2,
+        "exploration": 0.18,
+        "outcomes": {
+          "top": 37,
+          "bottom": 32,
+          "draw": 3,
+          "unfinished": 0
+        },
+        "rawRows": 503,
+        "augmentedRows": 1006,
+        "milliseconds": 27816.691042
+      },
+      "validation": {
+        "partition": "validation",
+        "games": 32,
+        "seed": 1803866639,
+        "maxPlies": 72,
+        "sampleEvery": 2,
+        "exploration": 0.18,
+        "outcomes": {
+          "top": 19,
+          "bottom": 12,
+          "draw": 1,
+          "unfinished": 0
+        },
+        "rawRows": 172,
+        "augmentedRows": 344,
+        "milliseconds": 4348.5561670000025
+      },
+      "test": {
+        "partition": "test",
+        "games": 40,
+        "seed": 3576789649,
+        "maxPlies": 72,
+        "sampleEvery": 2,
+        "exploration": 0.18,
+        "outcomes": {
+          "top": 24,
+          "bottom": 15,
+          "draw": 1,
+          "unfinished": 0
+        },
+        "rawRows": 244,
+        "augmentedRows": 488,
+        "milliseconds": 7849.320457999998
+      }
+    },
+    "historical": [
+      {
+        "fixture": "forced_loss_40_move_log.json",
+        "partition": "validation",
+        "plies": 40,
+        "status": "invalid:40:rightLaserStranded",
+        "included": false
+      },
+      {
+        "fixture": "incompatible_28_move_log.json",
+        "partition": "test",
+        "plies": 28,
+        "status": "invalid:26:incompatiblePaths",
+        "included": false
+      },
+      {
+        "fixture": "ultra_choke_46_move_log.json",
+        "partition": "validation",
+        "plies": 46,
+        "status": "top",
+        "included": true
+      },
+      {
+        "fixture": "ultra_freeze_11_move_log.json",
+        "partition": "train",
+        "plies": 11,
+        "status": "ongoing",
+        "included": false
+      },
+      {
+        "fixture": "ultra_freeze_13_move_log.json",
+        "partition": "train",
+        "plies": 13,
+        "status": "ongoing",
+        "included": false
+      },
+      {
+        "fixture": "ultra_loss_10_move_log.json",
+        "partition": "validation",
+        "plies": 10,
+        "status": "ongoing",
+        "included": false
+      },
+      {
+        "fixture": "ultra_loss_13_move_log.json",
+        "partition": "test",
+        "plies": 13,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_15_move_log.json",
+        "partition": "train",
+        "plies": 15,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_18_move_log.json",
+        "partition": "train",
+        "plies": 18,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_25_move_log.json",
+        "partition": "train",
+        "plies": 25,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_26_move_log.json",
+        "partition": "validation",
+        "plies": 26,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_30_move_log.json",
+        "partition": "test",
+        "plies": 30,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_loss_reversed_28_move_log.json",
+        "partition": "validation",
+        "plies": 28,
+        "status": "top",
+        "included": true
+      },
+      {
+        "fixture": "ultra_root_pruning_31_move_log.json",
+        "partition": "train",
+        "plies": 31,
+        "status": "bottom",
+        "included": true
+      },
+      {
+        "fixture": "ultra_slow_14_move_log.json",
+        "partition": "train",
+        "plies": 14,
+        "status": "ongoing",
+        "included": false
+      }
+    ],
+    "targeted": {
+      "train": {
+        "rows": 24,
+        "groups": 1
+      },
+      "validation": {
+        "rows": 24,
+        "groups": 1
+      },
+      "test": {
+        "rows": 24,
+        "groups": 1
+      }
+    },
+    "rows": {
+      "train": 1192,
+      "validation": 556,
+      "test": 590
+    },
+    "groups": {
+      "train": 76,
+      "validation": 35,
+      "test": 42
+    },
+    "independentSeeds": {
+      "train": 430108691,
+      "validation": 1803866639,
+      "test": 3576789649
+    },
+    "symmetryMaximumResidual": 0,
+    "totalGroups": 153
+  },
+  "selectedLambda": 0.1,
+  "lambdaCrossValidation": [
+    {
+      "lambda": 0.1,
+      "logLoss": 0.6165904736944103
+    },
+    {
+      "lambda": 0.03,
+      "logLoss": 0.6166934819186038
+    },
+    {
+      "lambda": 0.01,
+      "logLoss": 0.62141748599244
+    },
+    {
+      "lambda": 0.3,
+      "logLoss": 0.6264313185150995
+    },
+    {
+      "lambda": 0.003,
+      "logLoss": 0.6274554436323574
+    },
+    {
+      "lambda": 0.001,
+      "logLoss": 0.632312322659432
+    },
+    {
+      "lambda": 0.0003,
+      "logLoss": 0.63675381981059
+    }
+  ],
+  "metrics": {
+    "baseline": {
+      "train": {
+        "logLoss": 0.6527675122086154,
+        "brier": 0.2147098090580669,
+        "accuracy": 0.6635662769561989,
+        "calibrationError": 0.0851858418725552
+      },
+      "validation": {
+        "logLoss": 0.6113204981199694,
+        "brier": 0.1963127660054417,
+        "accuracy": 0.7440555101932808,
+        "calibrationError": 0.14058010508754526
+      },
+      "test": {
+        "logLoss": 0.6018266686808105,
+        "brier": 0.20153977347529797,
+        "accuracy": 0.7095824906800507,
+        "calibrationError": 0.10535050682083569
+      }
+    },
+    "candidate": {
+      "train": {
+        "logLoss": 0.595199343212108,
+        "brier": 0.19439688919935877,
+        "accuracy": 0.6501610724562418,
+        "calibrationError": 0.06265211993988157
+      },
+      "validation": {
+        "logLoss": 0.5383797530707147,
+        "brier": 0.17191285294145364,
+        "accuracy": 0.7149609978944348,
+        "calibrationError": 0.08325697080340334
+      },
+      "test": {
+        "logLoss": 0.567225943518141,
+        "brier": 0.1844009850726013,
+        "accuracy": 0.6587531844848917,
+        "calibrationError": 0.1003735503039279
+      }
+    }
+  },
+  "pairedTestDelta": {
+    "mean": 0.034600725162669654,
+    "low": -0.009477956182607713,
+    "high": 0.07393192652650982,
+    "groups": 42
+  },
+  "ablations": {
+    "shields": {
+      "removed": [
+        "shieldBalance"
+      ],
+      "lambda": 0.03,
+      "validation": {
+        "logLoss": 0.5436187568069258,
+        "brier": 0.1726545940637733,
+        "accuracy": 0.719966157853155,
+        "calibrationError": 0.09009939895533595
+      },
+      "test": {
+        "logLoss": 0.5763809429369677,
+        "brier": 0.18908048282067758,
+        "accuracy": 0.6565655347362664,
+        "calibrationError": 0.09412612288935221
+      }
+    },
+    "routes": {
+      "removed": [
+        "attackTempo",
+        "reserveTempo",
+        "oneMoveRouteBalance"
+      ],
+      "lambda": 0.1,
+      "validation": {
+        "logLoss": 0.6199017302941134,
+        "brier": 0.21010354057842226,
+        "accuracy": 0.6265612655318535,
+        "calibrationError": 0.04606149155720792
+      },
+      "test": {
+        "logLoss": 0.629058998860589,
+        "brier": 0.21192638308608888,
+        "accuracy": 0.6610692288741057,
+        "calibrationError": 0.09453289254285269
+      }
+    },
+    "assignment": {
+      "removed": [
+        "dedicatedLaserBalance"
+      ],
+      "lambda": 0.03,
+      "validation": {
+        "logLoss": 0.5385323598077709,
+        "brier": 0.17232786003704137,
+        "accuracy": 0.7149609978944348,
+        "calibrationError": 0.09470961842601741
+      },
+      "test": {
+        "logLoss": 0.5725533241700309,
+        "brier": 0.18635126028282534,
+        "accuracy": 0.6587531844848917,
+        "calibrationError": 0.11385562169770487
+      }
+    },
+    "exposure": {
+      "removed": [
+        "liveKingBalance"
+      ],
+      "lambda": 0.03,
+      "validation": {
+        "logLoss": 0.5463925916437565,
+        "brier": 0.17392652197026068,
+        "accuracy": 0.7304411575696406,
+        "calibrationError": 0.06281118063571604
+      },
+      "test": {
+        "logLoss": 0.5696361304905618,
+        "brier": 0.1857964245887505,
+        "accuracy": 0.7026932011078346,
+        "calibrationError": 0.09767215077554404
+      }
+    },
+    "cascade": {
+      "removed": [
+        "cascadeKingBalance"
+      ],
+      "lambda": 0.1,
+      "validation": {
+        "logLoss": 0.5383804336528529,
+        "brier": 0.17181220970080896,
+        "accuracy": 0.73496533566193,
+        "calibrationError": 0.06319483248157794
+      },
+      "test": {
+        "logLoss": 0.5669928361346528,
+        "brier": 0.18424210027901125,
+        "accuracy": 0.7252826035752858,
+        "calibrationError": 0.10712560404937663
+      }
+    },
+    "contact": {
+      "removed": [
+        "liveShieldBalance"
+      ],
+      "lambda": 0.1,
+      "validation": {
+        "logLoss": 0.5372700432066464,
+        "brier": 0.17131494226358226,
+        "accuracy": 0.73496533566193,
+        "calibrationError": 0.0675577966606751
+      },
+      "test": {
+        "logLoss": 0.5678607938909296,
+        "brier": 0.18419118756718503,
+        "accuracy": 0.7170073422512441,
+        "calibrationError": 0.0993453295054138
+      }
+    }
+  },
+  "coefficientConfidence95": {
+    "shieldBalance": {
+      "low": 0,
+      "high": 0.47428063535143017,
+      "zeroRate": 0.0375
+    },
+    "attackTempo": {
+      "low": 0.1287768562032023,
+      "high": 0.4348866431049895,
+      "zeroRate": 0
+    },
+    "reserveTempo": {
+      "low": 0.1467239526225402,
+      "high": 0.6836791168102665,
+      "zeroRate": 0
+    },
+    "dedicatedLaserBalance": {
+      "low": 0,
+      "high": 1.6250079857734374,
+      "zeroRate": 0.7625
+    },
+    "oneMoveRouteBalance": {
+      "low": 0.7420910019918396,
+      "high": 1.269788163556205,
+      "zeroRate": 0
+    },
+    "liveKingBalance": {
+      "low": 0,
+      "high": 0.3328329177214182,
+      "zeroRate": 0.6875
+    },
+    "cascadeKingBalance": {
+      "low": 0,
+      "high": 0.48763666469033007,
+      "zeroRate": 0.825
+    },
+    "liveShieldBalance": {
+      "low": 0,
+      "high": 0.839235950601002,
+      "zeroRate": 0.1125
+    }
+  },
+  "featureCoverage": {
+    "shieldBalance": {
+      "rows": 750,
+      "groups": 75,
+      "positiveRows": 366,
+      "negativeRows": 384
+    },
+    "attackTempo": {
+      "rows": 594,
+      "groups": 76,
+      "positiveRows": 230,
+      "negativeRows": 364
+    },
+    "reserveTempo": {
+      "rows": 566,
+      "groups": 69,
+      "positiveRows": 270,
+      "negativeRows": 296
+    },
+    "dedicatedLaserBalance": {
+      "rows": 48,
+      "groups": 2,
+      "positiveRows": 28,
+      "negativeRows": 20
+    },
+    "oneMoveRouteBalance": {
+      "rows": 286,
+      "groups": 73,
+      "positiveRows": 62,
+      "negativeRows": 224
+    },
+    "liveKingBalance": {
+      "rows": 160,
+      "groups": 57,
+      "positiveRows": 8,
+      "negativeRows": 152
+    },
+    "cascadeKingBalance": {
+      "rows": 42,
+      "groups": 18,
+      "positiveRows": 6,
+      "negativeRows": 36
+    },
+    "liveShieldBalance": {
+      "rows": 174,
+      "groups": 48,
+      "positiveRows": 28,
+      "negativeRows": 146
+    }
+  },
+  "rareStateEvidence": {
+    "dedicatedLaser": {
+      "rows": 13,
+      "groups": 1,
+      "baseline": {
+        "logLoss": 0.000613745133673246,
+        "brier": 3.948737839616492e-7,
+        "accuracy": 1,
+        "calibrationError": 0.0006135476097734622
+      },
+      "candidate": {
+        "logLoss": 0.005215972023762838,
+        "brier": 0.000030882889107329,
+        "accuracy": 1,
+        "calibrationError": 0.005200460949732279
+      },
+      "averageDefenseResources": null
+    },
+    "exposedKing": {
+      "rows": 44,
+      "groups": 35,
+      "baseline": {
+        "logLoss": 0.627979526606493,
+        "brier": 0.2091839914305253,
+        "accuracy": 0.7058823529411767,
+        "calibrationError": 0.148109147467442
+      },
+      "candidate": {
+        "logLoss": 0.66263665739598,
+        "brier": 0.20241203690028212,
+        "accuracy": 0.7352941176470591,
+        "calibrationError": 0.17569590954864966
+      },
+      "averageDefenseResources": null
+    },
+    "shieldCascade": {
+      "rows": 13,
+      "groups": 13,
+      "baseline": {
+        "logLoss": 0.5556082450242669,
+        "brier": 0.190198347062783,
+        "accuracy": 0.6923076923076924,
+        "calibrationError": 0.13916292402529207
+      },
+      "candidate": {
+        "logLoss": 0.5589826080484104,
+        "brier": 0.19862954642278044,
+        "accuracy": 0.6923076923076924,
+        "calibrationError": 0.19845837858597032
+      },
+      "averageDefenseResources": null
+    },
+    "forcedDefense": {
+      "rows": 24,
+      "groups": 20,
+      "baseline": {
+        "logLoss": 0.4696759089905655,
+        "brier": 0.1500945899027241,
+        "accuracy": 0.8,
+        "calibrationError": 0.04104392014698773
+      },
+      "candidate": {
+        "logLoss": 0.46317415364923176,
+        "brier": 0.138259808036991,
+        "accuracy": 0.8500000000000001,
+        "calibrationError": 0.093892928823575
+      },
+      "averageDefenseResources": 10.375
+    }
+  },
+  "speed": {
+    "positions": 240,
+    "coldMicrosecondsPerPosition": 66.93107916668548,
+    "warmMicrosecondsPerPosition": 1.8589583333338549,
+    "checksum": -135
+  },
+  "gates": {
+    "noLeakage": true,
+    "symmetry": true,
+    "monotonic": true,
+    "testMeanImprovement": true,
+    "testConfidence": false,
+    "dedicatedCoverage": false,
+    "rareTestCoverage": false
+  },
+  "promotionReady": false
+}
