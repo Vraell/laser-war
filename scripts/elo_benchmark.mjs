@@ -781,7 +781,7 @@ if (!childMode) {
   );
   const assessments = [];
   for (const difficulty of options.difficulties) {
-    const chunkSize = difficulty === "ultra" ? Math.min(2, options.pairs) : options.pairs;
+    const chunkSize = difficulty === "ultra" ? 1 : options.pairs;
     const chunks = [];
     const childArguments = [];
     for (let start = 0; start < options.pairs; start += chunkSize) {

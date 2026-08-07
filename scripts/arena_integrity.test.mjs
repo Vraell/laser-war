@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
@@ -103,5 +104,18 @@ const confirmation = runArena([
 assert.equal(confirmation.status, 0, confirmation.stderr);
 assert.notEqual(manifest(confirmation).openingHash, identicalManifest.openingHash);
 assert.match(manifest(confirmation).harnessHash, /^[a-f0-9]{12}$/);
+
+const workflow = readFileSync(resolve(projectRoot, ".github/workflows/pages.yml"), "utf8");
+assert.doesNotMatch(
+  workflow,
+  /--baseline-ref HEAD\^/,
+  "A failed preceding commit must never become the production qualification baseline.",
+);
+assert.match(workflow, /status: "success"/);
+assert.equal(
+  workflow.match(/^\s+- suite:/gm)?.length,
+  12,
+  "Ultra qualification must retain all twelve independently hosted shards.",
+);
 
 console.log("Arena isolation, qualification, holdout, truncation, and offset checks passed.");

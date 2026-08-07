@@ -72,11 +72,16 @@ No unreleased changes.
   damaged-shield, tactical, side-inverted, and late positions. Deployment now
   requires 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra
   mixed-opening pairs, and 16 additional Ultra confirmation pairs.
-- Split Ultra release qualification across six independent hosted-runner shards
+- Split Ultra release qualification across twelve independent hosted-runner shards
   and added a fail-closed aggregate verdict. The aggregator rejects missing or
   overlapping pair ranges, duplicate openings, mismatched source or harness
   bundles, inconsistent budgets and opening schedules, malformed payloads, and
   incomplete samples before Pages can build.
+- Resolve every comparison baseline from the latest successful production
+  workflow rather than the preceding commit. A failed release can no longer
+  silently become the strength or speed standard for its successor.
+- Isolate each Ultra opening pair in its own child process. Slow positions can
+  no longer combine inside one coarse chunk and trip the harness timeout.
 - Separated deterministic strength work from noisy hosted-runner latency.
   Node-budget arenas remain machine-independent, while search-speed checks,
   bounded child processes, and time-budgeted diagnostic arenas enforce runtime

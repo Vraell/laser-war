@@ -99,11 +99,13 @@ must fail the integrity suite.
 
 The Pages workflow gates every deployment on unit tests, arena-integrity qualification, the tactical corpus,
 search-speed non-regression, 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra mixed-opening
-pairs, and 16 additional Ultra pairs from an independent confirmation set. Ultra qualification is split into six
+pairs, and 16 additional Ultra pairs from an independent confirmation set. Ultra qualification is split into twelve
 independent hosted-runner shards, then reconstructed by a fail-closed aggregation step that rejects gaps,
 overlaps, duplicate openings, changed source or harness hashes, mismatched budgets and opening schedules, or
 missing results. Every difficulty and aggregate result
 must pass independently.
+The benchmark baseline is always the latest successful production workflow,
+not merely the preceding commit, so failed releases never lower the next gate.
 Ultra strength comparisons use a deterministic computation budget so machine load cannot change completed work.
 Wall-clock performance is enforced independently by the search-speed gate and bounded arena child processes;
 time-budgeted diagnostic runs additionally enforce the production move watchdog. Reported failures should become fixtures
