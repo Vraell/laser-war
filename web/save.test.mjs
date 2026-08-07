@@ -9,10 +9,15 @@ const saved = buildActiveSave({
   mode: "local",
   difficulty: "medium",
   humanSide: "top",
-  history: [],
+  history: [{
+    actor: "computer",
+    move: { row: 4, col: 2, mirror: "/" },
+    recovered: true,
+  }],
 });
 
 assert.equal(saved.gameVersion, "v0.11.14");
 assert.equal(saved.humanSide, "top");
+assert.equal(saved.moves[0].recovered, true);
 
 console.log("Web save metadata checks passed.");

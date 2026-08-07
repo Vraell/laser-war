@@ -21,6 +21,7 @@ assert.equal(loadLanguage(storage), "en");
 saveLanguage(storage, "fr");
 assert.equal(values.get(LANGUAGE_KEY), "fr");
 assert.equal(loadLanguage(storage), "fr");
+assert.doesNotThrow(() => saveLanguage({ setItem() { throw new Error("blocked"); } }, "en"));
 assert.equal(translate("fr", "playComputer"), "Jouer contre l'IA");
 assert.equal(
   translate("fr", "opponentKingUnreachable"),
@@ -53,6 +54,10 @@ assert.equal(
 );
 assert.equal(translate("fr", "matchLogTitle"), "LASER WAR · HISTORIQUE");
 assert.equal(translate("fr", "ultraSearch"), "Ultra · classement des coups possibles");
+assert.equal(
+  translate("fr", "computerSearchRecovered"),
+  "L'IA a repris la partie avec un coup sûr.",
+);
 assert.equal(
   translate("en", "ultraSearching", { depth: 4, nodes: "1,284", seconds: "1.7" }),
   "Ultra · depth 4 · 1,284 positions · 1.7s",

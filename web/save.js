@@ -36,6 +36,7 @@ export function buildActiveSave(session) {
       row: record.move.row,
       col: record.move.col,
       mirror: record.move.mirror,
+      recovered: Boolean(record.recovered),
     })),
   };
 }

@@ -97,6 +97,9 @@ const [candidate, baseline] = await Promise.all([
   loadRevision("baseline", baselineRef),
 ]);
 try {
+  // Exclude module initialization and JIT warm-up from the measured samples.
+  measureRevision(candidate);
+  measureRevision(baseline);
   const samples = { candidate: [], baseline: [] };
   for (let run = 0; run < 5; run += 1) {
     const order = run % 2

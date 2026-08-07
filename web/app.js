@@ -14,6 +14,7 @@ import {
 import { loadLanguage, saveLanguage, translate } from "./i18n.js?v=0.14.0";
 import { beamPoints } from "./beam.js?v=0.14.0";
 import { drawDetailKey } from "./result.js?v=0.14.0";
+import { computerWatchdogMs, emergencyComputerResult } from "./ai_recovery.js?v=0.14.0";
 import {
   BLUE_SIDE,
   RED_SIDE,
@@ -27,7 +28,6 @@ const SAVE_KEY = "laser-war.web.v1";
 const SOUND_KEY = "laser-war.sound.v1";
 const GAME_VERSION = "v0.14.0";
 const BEAM_VISIBLE_MS = 1_300;
-const ULTRA_WATCHDOG_MS = 11_000;
 const game = new Game();
 
 const elements = {
@@ -206,7 +206,7 @@ function startGame(
 }
 
 /** Resolve, record, animate, and save one player or computer move. */
-function playMove(move, actor) {
+function playMove(move, actor, { recovered = false } = {}) {
   if (inputLocked || paused || session.state.winner || session.state.draw) return;
   let outcome;
   try {
@@ -226,6 +226,7 @@ function playMove(move, actor) {
     before,
     after: cloneState(outcome.state),
     outcome,
+    recovered,
   };
   session.history.push(record);
   lastOutcome = outcome;
@@ -277,32 +278,44 @@ function beginComputerTurn() {
   }, 250);
 
   const requestId = ++aiRequestId;
-  if (!aiWorker) {
-    aiWorker = new Worker("./ai_worker.js?v=0.14.0", { type: "module" });
-    aiWorker.addEventListener("message", ({ data }) => {
-      if (data.requestId !== aiRequestId) return;
-      if (data.type === "progress") {
-        aiProgress = data.progress;
-        if (data.progress.best?.move) aiFallbackResult = data.progress.best;
-        renderAiProgress(aiDifficulty, aiStartedAt);
-        return;
-      }
-      finishComputerTurn(data.result);
-    });
-    aiWorker.addEventListener("error", () => {
-      cancelComputerTurn();
-      inputLocked = false;
-      render();
-      showToast(t("computerSearchFailed"), "warning");
-    });
+  try {
+    if (!aiWorker) {
+      aiWorker = new Worker("./ai_worker.js?v=0.14.0", { type: "module" });
+      const worker = aiWorker;
+      aiWorker.addEventListener("message", ({ data }) => {
+        if (data.requestId !== aiRequestId) return;
+        if (data.type === "progress") {
+          aiProgress = data.progress;
+          if (data.progress.best?.move) aiFallbackResult = data.progress.best;
+          renderAiProgress(aiDifficulty, aiStartedAt);
+          return;
+        }
+        if (data.type === "error") {
+          recoverComputerTurn(`worker exception: ${data.error || "unknown error"}`);
+          return;
+        }
+        finishComputerTurn(data.result);
+      });
+      aiWorker.addEventListener("error", () => {
+        if (worker === aiWorker) recoverComputerTurn("worker error event");
+      });
+    }
+    aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
+  } catch (error) {
+    recoverComputerTurn(`worker startup: ${error instanceof Error ? error.message : String(error)}`);
+    return;
   }
-  aiWorker.postMessage({ requestId, state: cloneState(session.state), difficulty });
-  if (difficulty === "ultra") {
-    aiWatchdog = window.setTimeout(
-      () => finishTimedOutComputerTurn(requestId),
-      ULTRA_WATCHDOG_MS,
-    );
-  }
+  aiWatchdog = window.setTimeout(
+    () => finishTimedOutComputerTurn(requestId),
+    computerWatchdogMs(difficulty),
+  );
+}
+
+/** Discard a failed worker before invoking the browser-side containment move. */
+function recoverComputerTurn(reason) {
+  cancelComputerTurn(true, true);
+  inputLocked = false;
+  finishComputerTurn(null, reason);
 }
 
 /** Terminate an overrun worker and play its last fully validated result. */
@@ -312,12 +325,10 @@ function finishTimedOutComputerTurn(requestId) {
   const elapsed = performance.now() - aiStartedAt;
   cancelComputerTurn(true, true);
   inputLocked = false;
-  if (!fallback?.move) {
-    render();
-    showToast(t("computerSearchFailed"), "warning");
-    return;
-  }
-  finishComputerTurn({ ...fallback, elapsed });
+  finishComputerTurn(
+    fallback?.move ? { ...fallback, elapsed } : null,
+    fallback?.move ? null : "watchdog expired before a validated result",
+  );
 }
 
 /** Render genuine AI search progress rather than a generic activity message. */
@@ -340,11 +351,21 @@ function renderAiProgress(difficulty, started) {
 }
 
 /** Apply a still-current AI result or restart search when it became stale. */
-function finishComputerTurn(result) {
+function finishComputerTurn(result, recoveryReason = null) {
   cancelComputerTurn(false, false);
   inputLocked = false;
   if (!computerTurn()) return;
-  if (!result.move) {
+  if (!result?.move || !game.isLegalMove(session.state, result.move)) {
+    aiWorker?.terminate();
+    aiWorker = null;
+    console.error(
+      "AI emergency recovery invoked:",
+      recoveryReason || (result?.move ? "worker returned an illegal move" : "worker returned no move"),
+    );
+    result = emergencyComputerResult(game, session.state);
+    if (result) showToast(t("computerSearchRecovered"), "warning");
+  }
+  if (!result?.move) {
     session.state.draw = true;
     saveGame();
     render();
@@ -357,7 +378,7 @@ function finishComputerTurn(result) {
     nodes: result.nodes.toLocaleString(language),
     elapsed: formatElapsed(result.elapsed),
   });
-  playMove(result.move, "computer");
+  playMove(result.move, "computer", { recovered: result.recovered });
 }
 
 /** Cancel timers and invalidate pending worker responses. */
@@ -589,12 +610,13 @@ function recordSummary(record) {
       effects.push(t("singleKingHit", { king: t(`${king}King`) }));
     }
   }
-  return t("record", {
+  const summary = t("record", {
     actor: actorLabel(record.actor),
     mirror: record.move.mirror,
     position: positionLabel(record.move.row, record.move.col),
     effects: effects.join(", ") || t("noDamage"),
   });
+  return record.recovered ? `${summary} · ${t("recoveredMove")}` : summary;
 }
 
 function positionLabel(row, col) {
@@ -764,6 +786,7 @@ function sessionFromSave(data) {
       before,
       after: cloneState(outcome.state),
       outcome,
+      recovered: Boolean(item.recovered),
     });
   }
   return restored;

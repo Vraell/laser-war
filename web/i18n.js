@@ -81,6 +81,8 @@ const TRANSLATIONS = {
     standardSearching: "{difficulty} · analyzing · {seconds}s",
     aiResult: "AI · depth {depth} · {nodes} positions · {elapsed}",
     computerSearchFailed: "Computer search failed. Start a new match to continue.",
+    computerSearchRecovered: "AI search recovered with a safe move.",
+    recoveredMove: "emergency AI recovery",
     noLegalMoves: "No legal moves. The game is a draw.",
     illegalMove: "That mirror placement is not legal.",
     laserEntry: "Laser-entry squares must remain empty.",
@@ -200,6 +202,8 @@ const TRANSLATIONS = {
     standardSearching: "{difficulty} · analyse · {seconds}s",
     aiResult: "IA · profondeur {depth} · {nodes} positions · {elapsed}",
     computerSearchFailed: "L'IA n'a pas pu jouer. Lancez une nouvelle partie.",
+    computerSearchRecovered: "L'IA a repris la partie avec un coup sûr.",
+    recoveredMove: "reprise d'urgence de l'IA",
     noLegalMoves: "Plus aucun coup possible : match nul.",
     illegalMove: "Ce placement de miroir est interdit.",
     laserEntry: "Les cases d'entrée des lasers doivent rester vides.",
@@ -251,7 +255,11 @@ export function loadLanguage(storage) {
 }
 
 export function saveLanguage(storage, language) {
-  storage.setItem(LANGUAGE_KEY, language === "fr" ? "fr" : "en");
+  try {
+    storage.setItem(LANGUAGE_KEY, language === "fr" ? "fr" : "en");
+  } catch {
+    // The active language still changes when storage is restricted.
+  }
 }
 
 /** Resolve and interpolate a translation with English fallback. */

@@ -37,6 +37,21 @@ Status: design target.
 - Required result: at least 3x end-to-end positions per second with identical legal moves and outcomes on the
   complete fixture corpus. A 10x target remains desirable but is not assumed.
 
+### Measured route and transposition hot paths
+
+Status: independently profiled production follow-up, not shipped in v0.14.0.
+
+- Reachability, compatible-route search, and route-distance search account for roughly 40% of sampled Ultra CPU
+  while traversing the same 324 directed board states. Prototype one cached transition analysis that serves all
+  three consumers; require exact agreement with the rules corpus before measuring the expected 20-35% speedup.
+- Replace dynamic reachability stacks and the general route-cost heap with typed fixed queues and a small Dial
+  queue for edge costs 0, 1, and 2. The estimated total-search gain is 10-15% with relatively contained risk.
+- Key transposition entries by position and store searched depth in the entry so deeper results can satisfy
+  shallower probes. Require unchanged tactical results and positive fixed-budget arena evidence before promotion.
+- Instrument graph expansions, compatible-route visits, and SAT work in the arena budget. Method-entry counting
+  is reproducible but does not make each unit equally expensive, so recalibrate the 20,000-unit release budget
+  only after the finer counter is validated against wall-time dispersion.
+
 ## Tactical Solvers
 
 ### Threat-space proof search

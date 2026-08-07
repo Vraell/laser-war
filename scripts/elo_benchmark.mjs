@@ -63,6 +63,7 @@ function parseArguments(argv) {
     resource: "nodes",
     openings: "mixed",
     gate: "nonregression",
+    output: null,
     verbose: false,
     auditIdentical: false,
   };
@@ -84,6 +85,7 @@ function parseArguments(argv) {
     else if (argument === "--resource") options.resource = argv[++index];
     else if (argument === "--openings") options.openings = argv[++index];
     else if (argument === "--gate") options.gate = argv[++index];
+    else if (argument === "--output") options.output = argv[++index];
     else if (argument === "--verbose") options.verbose = true;
     else if (argument === "--audit-identical") options.auditIdentical = true;
     else throw new Error(`Unknown argument: ${argument}`);
@@ -543,6 +545,7 @@ function playGame({
   opening,
   seed,
   maxPlies,
+  enforceWallTimeout,
 }) {
   const game = new Game();
   let state = structuredClone(opening);
@@ -583,7 +586,7 @@ function playGame({
     telemetry[owner].moves += 1;
     telemetry[owner].moveTimes.push(result.wallMilliseconds);
     telemetry[owner].depths.push(result.depth || 0);
-    if (result.wallMilliseconds > MOVE_WALL_TIMEOUT_MS) {
+    if (enforceWallTimeout && result.wallMilliseconds > MOVE_WALL_TIMEOUT_MS) {
       return operationalFailure(owner, "timeout", {
         illegal: null,
         timeout: owner,
@@ -694,6 +697,7 @@ function assessDifficulty(candidate, baseline, difficulty, options) {
         opening: opening.state,
         seed: 0xc0ffee + options.seedOffset + globalPair * 104729,
         maxPlies: options.maxPlies,
+        enforceWallTimeout: options.resource === "time",
       });
       results.push(result);
       if (result.score === null) pairValid = false;
@@ -897,8 +901,8 @@ if (!childMode) {
     }
   }
   const openingIds = assessments.flatMap(({ openings }) => openings.map(({ id }) => id));
-  console.log(`ARENA_MANIFEST ${JSON.stringify({
-    schema: "laser-war-arena-v2",
+  const manifest = {
+    schema: "laser-war-arena-v3",
     createdAt: new Date().toISOString(),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
@@ -917,8 +921,18 @@ if (!childMode) {
     referenceForfeits: assessments.flatMap(({ difficulty, forfeits }) => (
       forfeits.map((forfeit) => ({ difficulty, ...forfeit }))
     )),
+    qualification: assessments.map((assessment) => ({
+      difficulty: assessment.difficulty,
+      pairScores: assessment.pairScores,
+      invalid: assessment.invalid,
+      forfeits: assessment.forfeits,
+      sourceHashes: assessment.sourceHashes[0],
+      openingIds: assessment.openings.map(({ id }) => id),
+    })),
     result: aggregate,
-  })}`);
+  };
+  if (options.output) writeFileSync(resolve(projectRoot, options.output), `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`ARENA_MANIFEST ${JSON.stringify(manifest)}`);
 } else {
   const candidateBundle = sourceBundle(options.candidateRef, options.candidateAi);
   const baselineBundle = sourceBundle(options.baselineRef);

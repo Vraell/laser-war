@@ -87,10 +87,11 @@ node scripts/elo_benchmark.mjs \
 ```
 
 The arena gives both revisions the same seeded openings and both colors. It reports W/D/L, pentanomial pair
-results, estimated Elo with a paired-bootstrap 95% interval, illegal moves, timeouts, and average search time.
-Any candidate timeout, illegal move, exception, truncated pair, or malformed child result invalidates the entire
-batch; partial candidate games cannot become strength evidence. A reference-engine operational failure is an
-explicit forfeit under the same 11-second game clock and is reported in the manifest. Each AI receives the real
+results, estimated Elo with a paired-bootstrap 95% interval, illegal moves, operational failures, and average
+search time. Any candidate illegal move, exception, truncated pair, or
+malformed child result invalidates the entire batch; partial candidate games cannot become strength evidence.
+Time-budgeted runs also enforce the production 11-second move clock, with a reference-engine operational failure
+recorded as an explicit forfeit. Each AI receives the real
 Red or Blue state without perspective normalization, so side-specific objective errors are exercised directly.
 Ultra pairs run in bounded isolated chunks. An immutable candidate snapshot, semantic rule hash, executable-
 bundle hashes, operation counter, and run manifest make each comparison reproducible. A known-inferior candidate
@@ -98,10 +99,14 @@ must fail the integrity suite.
 
 The Pages workflow gates every deployment on unit tests, arena-integrity qualification, the tactical corpus,
 search-speed non-regression, 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra mixed-opening
-pairs, and 16 additional Ultra pairs from an independent confirmation set. Every difficulty and aggregate result
+pairs, and 16 additional Ultra pairs from an independent confirmation set. Ultra qualification is split into six
+independent hosted-runner shards, then reconstructed by a fail-closed aggregation step that rejects gaps,
+overlaps, duplicate openings, changed source or harness hashes, mismatched budgets and opening schedules, or
+missing results. Every difficulty and aggregate result
 must pass independently.
-Ultra receives a deterministic computation budget so machine load cannot change completed work; the production
-11-second real-time watchdog remains a separate failure condition. Reported failures should also become fixtures
+Ultra strength comparisons use a deterministic computation budget so machine load cannot change completed work.
+Wall-clock performance is enforced independently by the search-speed gate and bounded arena child processes;
+time-budgeted diagnostic runs additionally enforce the production move watchdog. Reported failures should become fixtures
 in `web/fixtures/`; deterministic tactical tests and statistical match tests cover different failure modes. Use
 `--difficulties ultra`, `--seed-offset N`, and `--ultra-nodes N` for focused or larger-budget runs.
 

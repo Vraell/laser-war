@@ -13,7 +13,7 @@ versions.
 
 No unreleased changes.
 
-## v0.14.0 - 2026-08-03
+## v0.14.0 - 2026-08-06
 
 ### Ultra search
 
@@ -72,6 +72,28 @@ No unreleased changes.
   damaged-shield, tactical, side-inverted, and late positions. Deployment now
   requires 64 paired mixed-opening games for Easy, Medium, and Hard, 32 Ultra
   mixed-opening pairs, and 16 additional Ultra confirmation pairs.
+- Split Ultra release qualification across six independent hosted-runner shards
+  and added a fail-closed aggregate verdict. The aggregator rejects missing or
+  overlapping pair ranges, duplicate openings, mismatched source or harness
+  bundles, inconsistent budgets and opening schedules, malformed payloads, and
+  incomplete samples before Pages can build.
+- Separated deterministic strength work from noisy hosted-runner latency.
+  Node-budget arenas remain machine-independent, while search-speed checks,
+  bounded child processes, and time-budgeted diagnostic arenas enforce runtime
+  behavior. This removes false 11-second move failures caused by runner
+  contention without weakening the 48-pair Ultra release sample.
+
+### Release hardening
+
+- Added crash containment for worker startup failures, search exceptions,
+  watchdog expiry before the first published result, and unusable worker
+  moves. These conditions remain release-gate failures and are reported in
+  browser diagnostics; if one nevertheless occurs in a player's browser, the
+  match continues with the strongest immediately legal fallback instead of
+  freezing.
+- Extended the watchdog to every AI difficulty, recreated failed workers, made
+  language switching tolerate restricted browser storage, pinned CI to Node 24,
+  and excluded runtime warm-up from the search-speed comparison.
 
 ### Research path
 
